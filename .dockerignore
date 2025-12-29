@@ -1,0 +1,52 @@
+# Git
+.git
+.gitignore
+.github
+
+# Build artifacts
+tempest-homekit-go
+.build/
+coverage.out
+coverage.txt
+
+# Logs
+*.log
+.logs/
+status_output*.log
+
+# Node.js (if not needed in container)
+node_modules/
+package-lock.json
+jest.config.js
+jest.setup.js
+jest.web.config.json
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Test files
+tests/
+*_test.go
+
+# IDE
+.vscode/
+.DS_Store
+
+# Environment files (handle via volumes)
+.env
+.env.backup
+
+# Database (handle via volumes)
+db/
+
+# Scripts (not needed in container)
+scripts/
+
+# Tools
+tools/
+
+# Temporary files
+*.tmp
+t.tmp
