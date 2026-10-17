@@ -554,7 +554,7 @@ func TestCSVNotifier_Send_ErrorHandling(t *testing.T) {
 
 	err := notifier.Send(alarm, channel, obs, "Test Station")
 	if err == nil {
-		t.Error("Expected error for missing CSV config")
+		t.Fatal("Expected error for missing CSV config")
 	}
 	if err.Error() != "CSV configuration missing for channel" {
 		t.Errorf("Expected 'CSV configuration missing' error, got: %v", err)
@@ -575,7 +575,7 @@ func TestJSONNotifier_Send_ErrorHandling(t *testing.T) {
 
 	err := notifier.Send(alarm, channel, obs, "Test Station")
 	if err == nil {
-		t.Error("Expected error for missing JSON config")
+		t.Fatal("Expected error for missing JSON config")
 	}
 	if err.Error() != "JSON configuration missing for channel" {
 		t.Errorf("Expected 'JSON configuration missing' error, got: %v", err)

@@ -364,7 +364,9 @@ func (ws *WeatherSystemModern) UpdateSensor(sensorName string, value float64) {
 	} else {
 		logger.Warn("Sensor %s not found", sensorName)
 	}
-} // GetAvailableSensors returns the list of available sensor names
+}
+
+// GetAvailableSensors returns the list of available sensor names
 func (ws *WeatherSystemModern) GetAvailableSensors() []string {
 	sensors := make([]string, 0, len(ws.Accessories))
 	for name := range ws.Accessories {

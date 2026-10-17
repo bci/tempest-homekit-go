@@ -158,7 +158,7 @@ func TestSMSNotifierTemplateExpansion(t *testing.T) {
 	// Will fail due to missing credentials, but that's expected
 	err := notifier.Send(alarm, channel, obs, "Test Station")
 	if err == nil {
-		t.Error("Expected error due to missing credentials")
+		t.Fatal("Expected error due to missing credentials")
 	}
 
 	// Verify the error is about credentials, not template expansion
@@ -217,7 +217,7 @@ func TestSMSNotifierWithTopicARN(t *testing.T) {
 	// Will fail on AWS API call, but validates config loading
 	err := notifier.Send(alarm, channel, obs, "Test Station")
 	if err == nil {
-		t.Error("Expected error due to invalid test credentials")
+		t.Fatal("Expected error due to invalid test credentials")
 	}
 
 	// Should fail on AWS API, not on config validation
@@ -276,7 +276,7 @@ func TestSMSNotifierMultipleRecipients(t *testing.T) {
 	// Will fail on AWS API call
 	err := notifier.Send(alarm, channel, obs, "Test Station")
 	if err == nil {
-		t.Error("Expected error due to invalid test credentials")
+		t.Fatal("Expected error due to invalid test credentials")
 	}
 
 	// Verify it's not a config error

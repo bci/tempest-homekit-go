@@ -984,7 +984,10 @@ func (s *Server) handleSaveContacts(w http.ResponseWriter, r *http.Request) {
 		for i, line := range lines {
 			if strings.HasPrefix(line, "CONTACT_LIST=") {
 				startLine = i
-				if strings.HasSuffix(line, "'") {
+				// Only an opening quote that is not closed on this line starts a
+				// multi-line value; an unquoted value is a single line.
+				value := strings.TrimPrefix(line, "CONTACT_LIST=")
+				if !strings.HasPrefix(value, "'") || (len(value) > 1 && strings.HasSuffix(value, "'")) {
 					endLine = i
 					break
 				}
@@ -994,6 +997,11 @@ func (s *Server) handleSaveContacts(w http.ResponseWriter, r *http.Request) {
 					break
 				}
 			}
+		}
+		if startLine != -1 && endLine == -1 {
+			// Unterminated quoted value: replace just the key's line rather than
+			// letting lines[endLine+1:] re-append the whole file.
+			endLine = startLine
 		}
 
 		newLines := strings.Split(fmt.Sprintf("CONTACT_LIST='%s'", string(contactsJSON)), "\n")
@@ -1112,7 +1120,10 @@ func (s *Server) handleSaveTags(w http.ResponseWriter, r *http.Request) {
 		for i, line := range lines {
 			if strings.HasPrefix(line, "TAG_LIST=") {
 				startLine = i
-				if strings.HasSuffix(line, "'") {
+				// Only an opening quote that is not closed on this line starts a
+				// multi-line value; an unquoted value is a single line.
+				value := strings.TrimPrefix(line, "TAG_LIST=")
+				if !strings.HasPrefix(value, "'") || (len(value) > 1 && strings.HasSuffix(value, "'")) {
 					endLine = i
 					break
 				}
@@ -1122,6 +1133,11 @@ func (s *Server) handleSaveTags(w http.ResponseWriter, r *http.Request) {
 					break
 				}
 			}
+		}
+		if startLine != -1 && endLine == -1 {
+			// Unterminated quoted value: replace just the key's line rather than
+			// letting lines[endLine+1:] re-append the whole file.
+			endLine = startLine
 		}
 
 		newLines := strings.Split(fmt.Sprintf("TAG_LIST='%s'", string(tagsJSON)), "\n")
