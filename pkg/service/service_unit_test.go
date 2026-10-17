@@ -7,9 +7,10 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
-// fakeDS implements the minimal subset of weather.DataSource used in tests
+// fakeDS implements the minimal subset of weather.DataSource used in tests; Start returns an already-closed channel and the other methods return zero values.
 type fakeDS struct{}
 
+// Start returns an already-closed observation channel.
 func (f *fakeDS) Start() (<-chan weather.Observation, error) {
 	ch := make(chan weather.Observation)
 	close(ch)
@@ -23,6 +24,7 @@ func (f *fakeDS) GetStatus() weather.DataSourceStatus {
 }
 func (f *fakeDS) GetType() weather.DataSourceType { return weather.DataSourceGenerated }
 
+// TestDataSourceFactoryOverride checks that DataSourceFactory can be replaced and the replacement is called.
 func TestDataSourceFactoryOverride(t *testing.T) {
 	orig := DataSourceFactory
 	defer func() { DataSourceFactory = orig }()

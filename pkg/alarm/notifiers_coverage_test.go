@@ -8,6 +8,8 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
+// TestSyslogNotifier_Send checks that SyslogNotifier.Send with no syslog config does not
+// panic; an error is expected and success is only logged.
 func TestSyslogNotifier_Send(t *testing.T) {
 	// Test syslog notifier (won't actually send, but covers code paths)
 	notifier := &SyslogNotifier{}
@@ -36,6 +38,8 @@ func TestSyslogNotifier_Send(t *testing.T) {
 	}
 }
 
+// TestEventLogNotifier_Send checks that EventLogNotifier.Send does not panic; an error
+// (expected off Windows) is only logged.
 func TestEventLogNotifier_Send(t *testing.T) {
 	// Test eventlog notifier
 	notifier := &EventLogNotifier{}
@@ -64,6 +68,8 @@ func TestEventLogNotifier_Send(t *testing.T) {
 	}
 }
 
+// TestNotifierFactory_SMSNotifier checks that the factory returns an *SMSNotifier for
+// "sms" when an SMS provider is configured.
 func TestNotifierFactory_SMSNotifier(t *testing.T) {
 	config := &AlarmConfig{
 		SMS: &SMSGlobalConfig{
@@ -88,6 +94,8 @@ func TestNotifierFactory_SMSNotifier(t *testing.T) {
 	}
 }
 
+// TestSyslogNotifier_PriorityLevels checks that each syslog priority string, including
+// unknown and empty ones, can be sent without panicking; errors are ignored.
 func TestSyslogNotifier_PriorityLevels(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -124,6 +132,8 @@ func TestSyslogNotifier_PriorityLevels(t *testing.T) {
 	}
 }
 
+// TestSyslogNotifier_NetworkConfiguration checks that a UDP syslog target that is not
+// listening does not cause a panic; success is only logged.
 func TestSyslogNotifier_NetworkConfiguration(t *testing.T) {
 	config := &AlarmConfig{
 		Syslog: &SyslogConfig{
@@ -147,6 +157,8 @@ func TestSyslogNotifier_NetworkConfiguration(t *testing.T) {
 	}
 }
 
+// TestEventLogNotifier_RuntimeCheck checks that EventLogNotifier.Send succeeds on
+// Windows; on other platforms it only checks that the syslog fallback does not panic.
 func TestEventLogNotifier_RuntimeCheck(t *testing.T) {
 	notifier := &EventLogNotifier{}
 	alarm := &Alarm{Name: "Test Alarm"}
@@ -166,6 +178,8 @@ func TestEventLogNotifier_RuntimeCheck(t *testing.T) {
 	}
 }
 
+// TestSMSNotifier_Send_MissingConfig checks that SMSNotifier.Send errors with "SMS
+// configuration missing for channel" when the channel has no SMS block.
 func TestSMSNotifier_Send_MissingConfig(t *testing.T) {
 	// Test with nil SMS config
 	notifier := &SMSNotifier{
@@ -198,6 +212,8 @@ func TestSMSNotifier_Send_MissingConfig(t *testing.T) {
 	}
 }
 
+// TestSMSNotifier_Send_MissingGlobalConfig checks that SMSNotifier.Send errors with
+// "global SMS configuration not set" when the notifier has no global SMS config.
 func TestSMSNotifier_Send_MissingGlobalConfig(t *testing.T) {
 	// Test with nil global config
 	notifier := &SMSNotifier{}
@@ -229,6 +245,8 @@ func TestSMSNotifier_Send_MissingGlobalConfig(t *testing.T) {
 	}
 }
 
+// TestEmailNotifier_Send_MissingConfig checks that EmailNotifier.Send errors with "email
+// configuration missing for channel" when the channel has no email block.
 func TestEmailNotifier_Send_MissingConfig(t *testing.T) {
 	// Test with nil email config
 	notifier := &EmailNotifier{
@@ -262,6 +280,8 @@ func TestEmailNotifier_Send_MissingConfig(t *testing.T) {
 	}
 }
 
+// TestEmailNotifier_Send_MissingGlobalConfig checks that EmailNotifier.Send errors with
+// "global email configuration not set" when the notifier has no global email config.
 func TestEmailNotifier_Send_MissingGlobalConfig(t *testing.T) {
 	// Test with nil global config
 	notifier := &EmailNotifier{}
@@ -294,6 +314,8 @@ func TestEmailNotifier_Send_MissingGlobalConfig(t *testing.T) {
 	}
 }
 
+// TestNotifierFactory_GetNotifier_UnknownType checks that GetNotifier returns a nil
+// notifier and an error for an unknown type.
 func TestNotifierFactory_GetNotifier_UnknownType(t *testing.T) {
 	config := &AlarmConfig{}
 	factory := NewNotifierFactory(config)
@@ -307,6 +329,8 @@ func TestNotifierFactory_GetNotifier_UnknownType(t *testing.T) {
 	}
 }
 
+// TestNotifierFactory_GetNotifier_AllTypes checks that GetNotifier returns a notifier
+// for each built-in type; an oslog failure is tolerated because it is macOS-only.
 func TestNotifierFactory_GetNotifier_AllTypes(t *testing.T) {
 	config := &AlarmConfig{}
 	factory := NewNotifierFactory(config)
@@ -332,6 +356,9 @@ func TestNotifierFactory_GetNotifier_AllTypes(t *testing.T) {
 	}
 }
 
+// TestEmailNotifier_TemplateFromChannel checks that an email channel with an empty Body
+// falls back to the channel Template rather than failing with the missing-config error;
+// the send itself is expected to fail for lack of an SMTP server.
 func TestEmailNotifier_TemplateFromChannel(t *testing.T) {
 	// Test that channel.Template is used when email.Body is empty
 	notifier := &EmailNotifier{

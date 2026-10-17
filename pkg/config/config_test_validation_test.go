@@ -168,12 +168,14 @@ func validateTestSMS(phone string) error {
 	return nil
 }
 
-// ValidationError represents a validation error
+// ValidationError represents a validation error returned by the test-local
+// validators in this file.
 type ValidationError struct {
-	Field   string
-	Message string
+	Field   string // Name of the field that failed validation
+	Message string // Human-readable message returned by Error
 }
 
+// Error implements the error interface by returning the message alone.
 func (e *ValidationError) Error() string {
 	return e.Message
 }

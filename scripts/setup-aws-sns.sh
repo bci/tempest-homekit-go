@@ -7,8 +7,20 @@
 # 2. Set SMS preferences for production use
 # 3. Optionally create an SNS topic for alarm notifications
 # 4. Configure spending limits and origination numbers
+#    (as implemented: sets MonthlySpendLimit only; no origination numbers)
 # 5. Test SMS delivery
 # 6. Update .env with the application runtime user credentials
+#    (as implemented: only AWS_SNS_TOPIC_ARN is written to .env, and only when
+#    a topic is created; credentials are never written - add them yourself)
+#
+# Actual order: load AWS_REGION from .env, check the CLI, verify credentials,
+# check SNS access, show current SMS attributes, set SMS type and monthly
+# spend limit (step 2/4), print limit-increase instructions, optionally create
+# a topic and subscribe phones (step 3), optionally send a test (step 5), and
+# print a summary. Every choice is prompted on stdin, so run it interactively.
+# These are real, account-wide AWS changes and the test SMS is billed.
+#
+# Usage: ./scripts/setup-aws-sns.sh    (from any directory; no arguments)
 #
 # Prerequisites:
 # - AWS CLI installed (brew install awscli or apt-get install awscli)
@@ -32,13 +44,70 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+#######################################
 # Function to print colored output
+# Print a message prefixed with a blue "ℹ" marker.
+# Globals:
+#   BLUE, NC (read): ANSI color escape codes.
+# Arguments:
+#   $1 - Message text.
+# Outputs:
+#   Writes the message to stdout.
+# Returns:
+#   0.
+#######################################
 print_info() { echo -e "${BLUE}ℹ ${NC}$1"; }
+#######################################
+# Print a message prefixed with a green "✓" marker.
+# Globals:
+#   GREEN, NC (read): ANSI color escape codes.
+# Arguments:
+#   $1 - Message text.
+# Outputs:
+#   Writes the message to stdout.
+# Returns:
+#   0.
+#######################################
 print_success() { echo -e "${GREEN}✓${NC} $1"; }
+#######################################
+# Print a message prefixed with a yellow "⚠" marker.
+# Globals:
+#   YELLOW, NC (read): ANSI color escape codes.
+# Arguments:
+#   $1 - Message text.
+# Outputs:
+#   Writes the message to stdout.
+# Returns:
+#   0.
+#######################################
 print_warning() { echo -e "${YELLOW}⚠${NC} $1"; }
+#######################################
+# Print a message prefixed with a red "✗" marker.
+# Globals:
+#   RED, NC (read): ANSI color escape codes.
+# Arguments:
+#   $1 - Message text.
+# Outputs:
+#   Writes the message to stdout.
+# Returns:
+#   0.
+#######################################
 print_error() { echo -e "${RED}✗${NC} $1"; }
 
+#######################################
 # Function to load .env file for region info only
+# Reads AWS_REGION (only) from the project .env file, if present.
+# Credentials in .env are deliberately not loaded: setup runs with the admin
+# CLI credentials. Quotes and spaces are stripped from the value.
+# Globals:
+#   ENV_FILE (read). AWS_REGION (set when .env defines it).
+# Arguments:
+#   None
+# Outputs:
+#   Writes status messages to stdout.
+# Returns:
+#   0.
+#######################################
 load_env() {
     if [ ! -f "$ENV_FILE" ]; then
         print_warning ".env file not found at: $ENV_FILE"
@@ -59,7 +128,18 @@ load_env() {
     fi
 }
 
+#######################################
 # Function to check AWS CLI installation
+# Verifies that the aws CLI is on PATH and reports its version.
+# Globals:
+#   None
+# Arguments:
+#   None
+# Outputs:
+#   Writes status messages to stdout.
+# Returns:
+#   0; exits 1 if aws is not installed.
+#######################################
 check_aws_cli() {
     print_info "Checking AWS CLI installation..."
     if ! command -v aws &> /dev/null; then
@@ -72,7 +152,20 @@ check_aws_cli() {
     print_success "AWS CLI installed (version $version)"
 }
 
+#######################################
 # Function to verify AWS CLI credentials
+# Checks the CLI credentials with `aws sts get-caller-identity`.
+# Prints the account ID and caller ARN, then prompts for a region if
+# AWS_REGION is still empty (from neither the environment nor .env).
+# Globals:
+#   AWS_REGION (read; set from the prompt when empty).
+# Arguments:
+#   None
+# Outputs:
+#   Writes account details and the prompt to stdout; reads stdin.
+# Returns:
+#   0; exits 1 if authentication fails or no region is entered.
+#######################################
 verify_credentials() {
     print_info "Verifying AWS CLI credentials..."
     print_warning "NOTE: Using your AWS CLI credentials (from ~/.aws/credentials or aws configure)"
@@ -102,7 +195,18 @@ verify_credentials() {
     fi
 }
 
+#######################################
 # Function to check SNS permissions
+# Verifies SNS access by calling `aws sns list-topics` in AWS_REGION.
+# Globals:
+#   AWS_REGION (read).
+# Arguments:
+#   None
+# Outputs:
+#   Writes status messages to stdout.
+# Returns:
+#   0; exits 1 if the call fails.
+#######################################
 check_permissions() {
     print_info "Checking SNS permissions..."
     
@@ -115,7 +219,19 @@ check_permissions() {
     fi
 }
 
+#######################################
 # Function to get current SMS attributes
+# Prints the account's current SNS SMS attributes as a table.
+# Globals:
+#   AWS_REGION (read).
+# Arguments:
+#   None
+# Outputs:
+#   Writes the attribute table to stdout.
+# Returns:
+#   0 on success; 1 if the AWS call fails. main calls this as a plain
+#   statement under `set -e`, so a failure ends the whole script here.
+#######################################
 get_sms_attributes() {
     print_info "Fetching current SMS attributes..."
     
@@ -132,7 +248,22 @@ get_sms_attributes() {
     echo ""
 }
 
+#######################################
 # Function to configure SMS for production
+# Prompts for and sets DefaultSMSType and MonthlySpendLimit account-wide.
+# Choice "1" selects Promotional; anything else (default) Transactional. The
+# spending limit defaults to 10 and is passed to AWS unvalidated. Both are
+# account-level settings for the region, not specific to this application.
+# Globals:
+#   AWS_REGION (read). SMS_TYPE (set).
+# Arguments:
+#   None
+# Outputs:
+#   Writes prompts and status to stdout; reads stdin.
+# Returns:
+#   0; exits non-zero (via `set -e`) if an aws call fails, e.g. when the
+#   limit exceeds the account's approved quota.
+#######################################
 configure_production_sms() {
     print_info "Configuring SMS for production use..."
     
@@ -177,7 +308,18 @@ configure_production_sms() {
     print_info "Visit: https://console.aws.amazon.com/support/home#/case/create?issueType=service-limit-increase"
 }
 
+#######################################
 # Function to request spending limit increase
+# Prints manual steps for requesting a higher SMS spending limit.
+# Globals:
+#   AWS_REGION (read).
+# Arguments:
+#   None
+# Outputs:
+#   Writes instructions to stdout and waits for Enter on stdin.
+# Returns:
+#   0.
+#######################################
 request_limit_increase() {
     echo ""
     print_info "To increase your SMS spending limit beyond \$1/month:"
@@ -198,7 +340,23 @@ request_limit_increase() {
     read -p "Press Enter to continue..."
 }
 
+#######################################
 # Function to create SNS topic
+# Optionally creates an SNS topic, records it in .env and subscribes phones.
+# Each step is confirmed interactively (default "y"; only a literal "y"
+# counts as yes). The topic ARN replaces an existing AWS_SNS_TOPIC_ARN line
+# in .env or is appended (creating .env if it does not exist). Each phone
+# number entered is subscribed with protocol sms until an empty line.
+# Globals:
+#   AWS_REGION, ENV_FILE, OSTYPE (read). TOPIC_ARN, create_topic, topic_name,
+#   update_env, subscribe_phones, phone_number (set; not local).
+# Arguments:
+#   None
+# Outputs:
+#   Writes prompts and status to stdout; reads stdin; may modify .env.
+# Returns:
+#   0; exits non-zero (via `set -e`) if an aws call fails.
+#######################################
 create_topic() {
     echo ""
     read -p "Create an SNS topic for alarm notifications? (y/n) [default: y]: " create_topic
@@ -279,7 +437,22 @@ create_topic() {
     fi
 }
 
+#######################################
 # Function to test SMS delivery
+# Optionally sends a test message.
+# If a topic was created in this run it publishes to the topic (all
+# subscribers receive it) and the phone number entered is not used;
+# otherwise it sends a direct SMS to that number. AWS output is discarded.
+# Globals:
+#   AWS_REGION, TOPIC_ARN (read). MESSAGE, send_test, test_phone (set).
+# Arguments:
+#   None
+# Outputs:
+#   Writes prompts and status to stdout; reads stdin.
+# Returns:
+#   0; a failed publish exits the script (via `set -e`) with no error text
+#   because the aws output is redirected to /dev/null.
+#######################################
 test_sms() {
     echo ""
     read -p "Send a test SMS? (y/n) [default: y]: " send_test
@@ -326,7 +499,18 @@ test_sms() {
     print_warning "If not received, you may be in sandbox mode - see next steps below"
 }
 
+#######################################
 # Function to display final summary
+# Prints the configuration summary and follow-up steps.
+# Globals:
+#   AWS_REGION, SMS_TYPE, TOPIC_ARN (read).
+# Arguments:
+#   None
+# Outputs:
+#   Writes the summary to stdout.
+# Returns:
+#   0.
+#######################################
 display_summary() {
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -384,7 +568,18 @@ display_summary() {
     echo ""
 }
 
+#######################################
 # Main execution
+# Runs every setup step in order.
+# Globals:
+#   None directly; see the individual steps.
+# Arguments:
+#   $@ - Accepted but ignored.
+# Outputs:
+#   Writes the banner and each step's output to stdout.
+# Returns:
+#   0 on success; exits early as described by the steps.
+#######################################
 main() {
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

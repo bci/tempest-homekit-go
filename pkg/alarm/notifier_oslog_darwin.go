@@ -20,9 +20,13 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
-// OSLogNotifier sends notifications to macOS unified logging system
+// OSLogNotifier sends notifications to macOS unified logging system (this
+// darwin build uses cgo and os_log).
 type OSLogNotifier struct{}
 
+// Send expands channel.Template and logs it via os_log with subsystem
+// "com.bci.tempest-homekit", category "alarm", default level and the message
+// marked public so it is not redacted. It never returns an error.
 func (n *OSLogNotifier) Send(alarm *Alarm, channel *Channel, obs *weather.Observation, stationName string) error {
 	message := expandTemplate(channel.Template, alarm, obs, stationName)
 

@@ -2,6 +2,15 @@
 
 # Tempest HomeKit Go - GoDoc Server Script
 # Starts a local godoc server for browsing Go documentation
+#
+# Must be run from the project root (it reads ./go.mod). Installs godoc with
+# `go install` if it is missing, validates the port (1024-65535), refuses a
+# port that already has a TCP listener, optionally opens the browser at
+# http://localhost:PORT/pkg/<module>/, and then runs godoc in the foreground
+# until Ctrl+C.
+#
+# Usage: ./scripts/start-godoc.sh [--port PORT] [--no-browser] [--help]
+# Environment: GODOC_PORT (default 6060), OPEN_BROWSER (default true).
 
 set -e
 
@@ -16,6 +25,17 @@ NC='\033[0m' # No Color
 GODOC_PORT=${GODOC_PORT:-6060}
 OPEN_BROWSER=${OPEN_BROWSER:-true}
 
+#######################################
+# Prints the script banner.
+# Globals:
+#   BLUE, NC (read).
+# Arguments:
+#   None
+# Outputs:
+#   Writes the banner to stdout.
+# Returns:
+#   0.
+#######################################
 print_header() {
     echo -e "${BLUE}=================================================${NC}"
     echo -e "${BLUE} Tempest HomeKit Go - GoDoc Server${NC}"
@@ -23,6 +43,17 @@ print_header() {
     echo ""
 }
 
+#######################################
+# Prints command-line usage, options and environment variables.
+# Globals:
+#   None
+# Arguments:
+#   None
+# Outputs:
+#   Writes the usage text, using $0 as the script name, to stdout.
+# Returns:
+#   0.
+#######################################
 print_usage() {
     echo "Usage: $0 [OPTIONS]"
     echo ""
@@ -42,6 +73,20 @@ print_usage() {
     echo "  GODOC_PORT=8080 $0         # Use environment variable"
 }
 
+#######################################
+# Ensures the godoc binary is available, installing it if missing.
+# Installs with `go install golang.org/x/tools/cmd/godoc@latest` (unpinned,
+# needs network access) into GOBIN/GOPATH/bin, which must be on PATH for
+# start_godoc to find it.
+# Globals:
+#   RED, GREEN, YELLOW, NC (read).
+# Arguments:
+#   None
+# Outputs:
+#   Writes status messages to stdout.
+# Returns:
+#   0 if godoc is present or was installed; exits 1 if installation fails.
+#######################################
 check_godoc() {
     echo -e "${YELLOW}Checking godoc installation...${NC}"
     
@@ -64,6 +109,18 @@ check_godoc() {
     echo -e "${GREEN}✓ godoc installed successfully${NC}"
 }
 
+#######################################
+# Verifies that go.mod exists in the current directory and prints its module path.
+# Globals:
+#   RED, GREEN, NC (read).
+# Arguments:
+#   None
+# Outputs:
+#   Writes status messages to stdout.
+# Returns:
+#   0; exits 1 if go.mod is not found (the script must be run from the
+#   project root).
+#######################################
 check_go_mod() {
     if [[ ! -f "go.mod" ]]; then
         echo -e "${RED}✗ go.mod not found${NC}"
@@ -75,6 +132,21 @@ check_go_mod() {
     echo -e "${GREEN}✓ Found Go module: ${module_name}${NC}"
 }
 
+#######################################
+# Starts `godoc -http=:PORT` in the foreground until interrupted.
+# Refuses to start if lsof reports a TCP listener on the port (if lsof is not
+# installed the check silently passes). When OPEN_BROWSER is "true", a
+# background subshell opens the module's package page after 3 seconds.
+# Globals:
+#   OPEN_BROWSER, RED, GREEN, YELLOW, BLUE, NC (read).
+# Arguments:
+#   $1 - TCP port to listen on.
+# Outputs:
+#   Writes the URLs and status to stdout, followed by godoc's own output.
+# Returns:
+#   godoc's exit status (normally only after Ctrl+C); exits 1 if the port is
+#   already in use.
+#######################################
 start_godoc() {
     local port=$1
     local module_name=$(grep "^module " go.mod | cut -d' ' -f2)
@@ -108,6 +180,20 @@ start_godoc() {
     godoc -http=":${port}"
 }
 
+#######################################
+# Opens a URL in the default browser for the host OS.
+# Uses `open` on macOS, `xdg-open` or `gnome-open` on Linux and `start` on
+# Cygwin/MinGW/MSYS (where `start` is a cmd.exe built-in that bash may not
+# find). Does nothing on other systems or when no opener is installed.
+# Globals:
+#   None
+# Arguments:
+#   $1 - URL to open.
+# Outputs:
+#   None (opener output is discarded).
+# Returns:
+#   The opener's exit status, or 0 when none was run.
+#######################################
 open_browser() {
     local url=$1
     

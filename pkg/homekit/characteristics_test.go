@@ -2,6 +2,7 @@ package homekit
 
 import "testing"
 
+// TestCustomCharacteristicsConstructors checks that each custom characteristic constructor returns a non-nil value.
 func TestCustomCharacteristicsConstructors(t *testing.T) {
 	ws := NewWindSpeedCharacteristic()
 	if ws == nil {

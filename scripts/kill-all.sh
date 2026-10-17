@@ -8,6 +8,16 @@
 #   ./scripts/kill-all.sh           # Kill with SIGTERM (graceful)
 #   ./scripts/kill-all.sh -9        # Kill with SIGKILL (force)
 #   ./scripts/kill-all.sh --force   # Kill with SIGKILL (force)
+#
+# Processes are found with `pgrep -f tempest-homekit-go`, which matches the
+# string anywhere in a full command line - not only the app binary but any
+# process whose arguments or path contain it (an editor or `tail -f` on a
+# repo file, a test script run by absolute path, this script itself when
+# invoked by a path that includes the repo directory). Their PIDs and command
+# lines are printed before the signal is sent. After one second it checks
+# again; if none remain it reports whether anything still holds port 50222
+# (lsof checks TCP and UDP) and exits 0, otherwise it lists the survivors and
+# exits 1. Only the first argument is examined; other arguments are ignored.
 
 set -e
 

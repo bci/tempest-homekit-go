@@ -14,7 +14,14 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
-// TestWebhookConfiguration tests webhook notification by sending a test message
+// TestWebhookConfiguration tests webhook notification by sending a test message.
+//
+// The target URL comes from the TEST_WEBHOOK_URL environment variable, not
+// from the alarm config. alarmsJSON is the alarm config input accepted by
+// [LoadAlarmConfig] (used to build the notifier through the real factory);
+// stationName fills {{station}}. It prints the request and the expanded JSON
+// body, then POSTs it. It returns an error if TEST_WEBHOOK_URL is unset, the
+// config fails to load, or the request fails or gets a non-2xx response.
 func TestWebhookConfiguration(alarmsJSON, stationName string) error {
 	fmt.Println("Testing webhook notification output...")
 	fmt.Println()
@@ -93,7 +100,8 @@ func TestWebhookConfiguration(alarmsJSON, stationName string) error {
 	return nil
 }
 
-// RunWebhookTest is a convenience function that wraps TestWebhookConfiguration and exits
+// RunWebhookTest is a convenience function that wraps TestWebhookConfiguration and exits.
+// It never returns: it calls os.Exit(0) on success and log.Fatalf on failure.
 func RunWebhookTest(alarmsJSON, stationName string) {
 	if err := TestWebhookConfiguration(alarmsJSON, stationName); err != nil {
 		log.Fatalf("Webhook test failed: %v", err)
@@ -101,7 +109,13 @@ func RunWebhookTest(alarmsJSON, stationName string) {
 	os.Exit(0)
 }
 
-// TestWebhookConfigurationWithServer creates a test HTTP server and tests webhook delivery
+// TestWebhookConfigurationWithServer creates a test HTTP server and tests webhook delivery.
+//
+// It starts a local httptest server that prints and records each request,
+// points TEST_WEBHOOK_URL at it (left set in the process environment
+// afterwards), runs [TestWebhookConfiguration], and prints a summary of the
+// last JSON body received. It returns an error if the webhook test fails or
+// the server received no JSON request.
 func TestWebhookConfigurationWithServer(alarmsJSON, stationName string) error {
 	fmt.Println("Testing webhook notification with local test server...")
 	fmt.Println()

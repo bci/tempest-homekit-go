@@ -9,6 +9,9 @@ import (
 )
 
 // TestRunEmailTestValidation tests validation in runEmailTest
+//
+// It re-creates the relevant logic or data locally and does not call
+// main.go code, so it documents intended behaviour rather than guarding it.
 func TestRunEmailTestValidation(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -55,6 +58,9 @@ func TestRunEmailTestValidation(t *testing.T) {
 }
 
 // TestRunSMSTestValidation tests validation in runSMSTest
+//
+// It re-creates the relevant logic or data locally and does not call
+// main.go code, so it documents intended behaviour rather than guarding it.
 func TestRunSMSTestValidation(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -100,6 +106,9 @@ func TestRunSMSTestValidation(t *testing.T) {
 }
 
 // TestRunConsoleTestValidation tests validation in runConsoleTest
+//
+// It re-creates the relevant logic or data locally and does not call
+// main.go code, so it documents intended behaviour rather than guarding it.
 func TestRunConsoleTestValidation(t *testing.T) {
 	cfg := &config.Config{
 		Alarms: "",
@@ -115,6 +124,9 @@ func TestRunConsoleTestValidation(t *testing.T) {
 }
 
 // TestTestEmailParameterValidation tests the email parameter validation from main.go
+//
+// It re-creates the relevant logic or data locally and does not call
+// main.go code, so it documents intended behaviour rather than guarding it.
 func TestTestEmailParameterValidation(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -163,6 +175,9 @@ func TestTestEmailParameterValidation(t *testing.T) {
 }
 
 // TestTestSMSParameterValidation tests the SMS parameter validation from main.go
+//
+// It re-creates the relevant logic or data locally and does not call
+// main.go code, so it documents intended behaviour rather than guarding it.
 func TestTestSMSParameterValidation(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -211,6 +226,9 @@ func TestTestSMSParameterValidation(t *testing.T) {
 }
 
 // TestTestFunctionEnvironmentSetup tests that test functions set env vars correctly
+//
+// It re-creates the relevant logic or data locally and does not call
+// main.go code, so it documents intended behaviour rather than guarding it.
 func TestTestFunctionEnvironmentSetup(t *testing.T) {
 	t.Run("email test sets env var", func(t *testing.T) {
 		testEmail := "test@example.com"
@@ -236,6 +254,9 @@ func TestTestFunctionEnvironmentSetup(t *testing.T) {
 }
 
 // TestTestFlagsPriority tests that test flags are checked in correct order
+//
+// It re-creates the relevant logic or data locally and does not call
+// main.go code, so it documents intended behaviour rather than guarding it.
 func TestTestFlagsPriority(t *testing.T) {
 	// Test flags should be checked before normal service startup
 	// The order in main.go is:
@@ -273,6 +294,9 @@ func TestTestFlagsPriority(t *testing.T) {
 }
 
 // TestAllTestFlagsRequireAlarms tests that all test delivery methods require alarms config
+//
+// It re-creates the relevant logic or data locally and does not call
+// main.go code, so it documents intended behaviour rather than guarding it.
 func TestAllTestFlagsRequireAlarms(t *testing.T) {
 	testFlags := []struct {
 		name string
@@ -317,6 +341,9 @@ func TestAllTestFlagsRequireAlarms(t *testing.T) {
 }
 
 // TestTestAPIDoesNotRequireAlarms tests that --test-api doesn't need alarms
+//
+// It re-creates the relevant logic or data locally and does not call
+// main.go code, so it documents intended behaviour rather than guarding it.
 func TestTestAPIDoesNotRequireAlarms(t *testing.T) {
 	cfg := &config.Config{
 		Alarms: "", // TestAPI doesn't need alarms
@@ -329,6 +356,9 @@ func TestTestAPIDoesNotRequireAlarms(t *testing.T) {
 }
 
 // TestMultipleTestFlagsBehavior documents behavior when multiple test flags are set
+//
+// It re-creates the relevant logic or data locally and does not call
+// main.go code, so it documents intended behaviour rather than guarding it.
 func TestMultipleTestFlagsBehavior(t *testing.T) {
 	// When multiple test flags are set, main.go processes them in order:
 	// TestEmail is checked first, so it would execute and exit
@@ -351,6 +381,9 @@ func TestMultipleTestFlagsBehavior(t *testing.T) {
 }
 
 // TestTestFlagsExitBehavior documents that test flags should exit after completion
+//
+// It re-creates the relevant logic or data locally and does not call
+// main.go code, so it documents intended behaviour rather than guarding it.
 func TestTestFlagsExitBehavior(t *testing.T) {
 	// All test functions call os.Exit(0) after completion
 	// This test documents that behavior
@@ -389,6 +422,9 @@ func TestTestFlagsExitBehavior(t *testing.T) {
 }
 
 // TestRunUDPTestValidation tests validation in runUDPTest
+//
+// It re-creates the relevant logic or data locally and does not call
+// main.go code, so it documents intended behaviour rather than guarding it.
 func TestRunUDPTestValidation(t *testing.T) {
 	// UDP test doesn't require alarms, only valid network setup
 	cfg := &config.Config{
@@ -402,6 +438,9 @@ func TestRunUDPTestValidation(t *testing.T) {
 }
 
 // TestRunHomeKitTestValidation tests validation in runHomeKitTest
+//
+// It re-creates the relevant logic or data locally and does not call
+// main.go code, so it documents intended behaviour rather than guarding it.
 func TestRunHomeKitTestValidation(t *testing.T) {
 	cfg := &config.Config{
 		TestHomeKit: true,
@@ -422,6 +461,9 @@ func TestRunHomeKitTestValidation(t *testing.T) {
 }
 
 // TestRunWebStatusTestValidation tests validation in runWebStatusTest
+//
+// It re-creates the relevant logic or data locally and does not call
+// main.go code, so it documents intended behaviour rather than guarding it.
 func TestRunWebStatusTestValidation(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -462,6 +504,9 @@ func TestRunWebStatusTestValidation(t *testing.T) {
 }
 
 // TestRunAlarmTestValidation tests validation in runAlarmTest
+//
+// It re-creates the relevant logic or data locally and does not call
+// main.go code, so it documents intended behaviour rather than guarding it.
 func TestRunAlarmTestValidation(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -506,6 +551,9 @@ func TestRunAlarmTestValidation(t *testing.T) {
 }
 
 // TestTestUDPDefaultValue tests that --test-udp defaults to 120 seconds
+//
+// It re-creates the relevant logic or data locally and does not call
+// main.go code, so it documents intended behaviour rather than guarding it.
 func TestTestUDPDefaultValue(t *testing.T) {
 	// When --test-udp flag is present without value, it should default to 120
 	defaultSeconds := 120
@@ -526,6 +574,9 @@ func TestTestUDPDefaultValue(t *testing.T) {
 }
 
 // TestTestUDPCustomValue tests that --test-udp accepts custom seconds
+//
+// It re-creates the relevant logic or data locally and does not call
+// main.go code, so it documents intended behaviour rather than guarding it.
 func TestTestUDPCustomValue(t *testing.T) {
 	customSeconds := 30
 
@@ -539,6 +590,9 @@ func TestTestUDPCustomValue(t *testing.T) {
 }
 
 // TestAllNewTestFlagsCovered documents the new test flags
+//
+// It re-creates the relevant logic or data locally and does not call
+// main.go code, so it documents intended behaviour rather than guarding it.
 func TestAllNewTestFlagsCovered(t *testing.T) {
 	newTestFlags := []struct {
 		name        string

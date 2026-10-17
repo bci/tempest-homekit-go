@@ -10,7 +10,13 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
-// TestEventLogConfiguration tests eventlog notification by sending a test message (Windows only)
+// TestEventLogConfiguration tests eventlog notification by sending a test message (Windows only).
+//
+// alarmsJSON is the alarm config input accepted by [LoadAlarmConfig];
+// stationName fills {{station}}. It returns an error immediately on non-Windows
+// systems, and otherwise if the config fails to load or the send fails. Note
+// the Windows EventLogNotifier currently only writes to the application log,
+// so the Event Viewer instructions it prints do not yet match the delivery.
 func TestEventLogConfiguration(alarmsJSON, stationName string) error {
 	fmt.Println("Testing Windows Event Log notification...")
 	fmt.Println()
@@ -73,7 +79,8 @@ func TestEventLogConfiguration(alarmsJSON, stationName string) error {
 	return nil
 }
 
-// RunEventLogTest is a convenience function that wraps TestEventLogConfiguration and exits
+// RunEventLogTest is a convenience function that wraps TestEventLogConfiguration and exits.
+// It never returns: it calls os.Exit(0) on success and log.Fatalf on failure.
 func RunEventLogTest(alarmsJSON, stationName string) {
 	if err := TestEventLogConfiguration(alarmsJSON, stationName); err != nil {
 		log.Fatalf("EventLog test failed: %v", err)

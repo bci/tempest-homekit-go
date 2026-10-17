@@ -15,7 +15,27 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-// Manager manages alarm evaluation and notifications
+// Manager manages alarm evaluation and notifications.
+//
+// It owns the live [AlarmConfig] (whose Alarm values carry cooldown and
+// change-detection state), an [Evaluator], and a [NotifierFactory] bound to
+// the current credentials. When the config came from a file, it also watches
+// that file with fsnotify and hot-reloads it. All methods are safe for
+// concurrent use; mu guards config, notifierFactory, lastLoadTime and the
+// location.
+//
+// Fields:
+//   - config: the active configuration; replaced wholesale on reload.
+//   - configPath: the watched file path, empty for inline JSON.
+//   - lastLoadTime: when config was last (re)loaded.
+//   - evaluator: shared stateless condition evaluator.
+//   - notifierFactory: builds notifiers using config's credentials.
+//   - watcher: fsnotify watcher on configPath's directory, nil if none.
+//   - stationName: station name exposed to templates as {{station}}.
+//   - latitude, longitude: station location passed to sun-based schedules
+//     (0,0 until [Manager.SetLocation] is called).
+//   - mu: guards the mutable fields above.
+//   - stopChan: closed by [Manager.Stop] to end the watcher goroutine.
 type Manager struct {
 	config          *AlarmConfig
 	configPath      string
@@ -30,7 +50,15 @@ type Manager struct {
 	stopChan        chan struct{}
 }
 
-// NewManager creates a new alarm manager
+// NewManager creates a new alarm manager.
+//
+// configInput is either "@path" to a JSON file or an inline JSON string, as
+// accepted by [LoadAlarmConfig]; stationName is used for the {{station}}
+// template variable. For file input it starts watching the file's directory
+// for changes; failure to set up the watcher is logged and not fatal. It logs
+// the loaded alarms and warns (without failing) about channels whose provider
+// credentials are missing. It returns an error only if the config cannot be
+// loaded or validated.
 func NewManager(configInput string, stationName string) (*Manager, error) {
 	config, err := LoadAlarmConfig(configInput)
 	if err != nil {
@@ -86,7 +114,11 @@ func NewManager(configInput string, stationName string) (*Manager, error) {
 	return m, nil
 }
 
-// validateConfigProviders checks that required environment variables are set for delivery methods
+// validateConfigProviders checks that required environment variables are set for delivery methods.
+//
+// It looks only at enabled alarms, and only for email and sms channels, and
+// logs a warning listing missing variables for the configured provider. It
+// never fails, so a misconfigured provider surfaces as a send error later.
 func validateConfigProviders(config *AlarmConfig) {
 	// Track which delivery methods are used
 	usesEmail := false
@@ -197,7 +229,12 @@ func validateConfigProviders(config *AlarmConfig) {
 	}
 }
 
-// setupFileWatcher sets up cross-platform file watching for alarm config
+// setupFileWatcher sets up cross-platform file watching for alarm config.
+//
+// It watches the file's directory rather than the file itself so that editors
+// which save by replacing the file (rename/create) are still seen, then starts
+// watchConfigFile in a goroutine. It returns an error if the watcher cannot be
+// created or the directory cannot be watched.
 func (m *Manager) setupFileWatcher() error {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -222,7 +259,12 @@ func (m *Manager) setupFileWatcher() error {
 	return nil
 }
 
-// watchConfigFile monitors for config file changes
+// watchConfigFile monitors for config file changes.
+//
+// It runs until stopChan is closed or the watcher's channels close, reloading
+// the config on every Write or Create event for the config's base name. There
+// is no debouncing, so one save can trigger several reloads. Reload failures
+// are logged and the previous config stays active.
 func (m *Manager) watchConfigFile() {
 	configFileName := filepath.Base(m.configPath)
 
@@ -257,7 +299,14 @@ func (m *Manager) watchConfigFile() {
 	}
 }
 
-// reloadConfig reloads the alarm configuration from file
+// reloadConfig reloads the alarm configuration from file.
+//
+// It re-reads and validates configPath, re-applies credentials from the
+// environment, and swaps in the new config and a new notifier factory under
+// the lock. The new Alarm values start fresh, so cooldown timers,
+// change-detection baselines and TriggeredCount are reset by a reload. On any
+// read, parse or validation error the current config is kept and the error
+// returned.
 func (m *Manager) reloadConfig() error {
 	data, err := os.ReadFile(m.configPath)
 	if err != nil {
@@ -314,7 +363,15 @@ func (m *Manager) reloadConfig() error {
 	return nil
 }
 
-// ProcessObservation evaluates all alarms against a new weather observation
+// ProcessObservation evaluates all alarms against a new weather observation.
+//
+// For each enabled alarm that is inside its schedule and out of cooldown, it
+// evaluates the condition and, if true, sends notifications on every channel,
+// increments TriggeredCount and starts the cooldown. Afterwards it records the
+// observation's values as the alarm's previous values for change detection.
+// Evaluation and delivery errors are logged, not returned. A nil obs is
+// ignored. The manager lock is held for the whole call, including network
+// delivery, so slow channels delay other callers.
 func (m *Manager) ProcessObservation(obs *weather.Observation) {
 	if obs == nil {
 		return
@@ -385,7 +442,9 @@ func (m *Manager) ProcessObservation(obs *weather.Observation) {
 	}
 }
 
-// sendNotifications sends notifications through all configured channels for an alarm
+// sendNotifications sends notifications through all configured channels for an alarm.
+// Each channel is attempted independently; failures are logged and do not stop
+// the remaining channels. Callers must hold m.mu.
 func (m *Manager) sendNotifications(alarm *Alarm, obs *weather.Observation) {
 	logger.Debug("Sending notifications for alarm '%s' through %d channels", alarm.Name, len(alarm.Channels))
 	for i := range alarm.Channels {
@@ -409,7 +468,8 @@ func (m *Manager) sendNotifications(alarm *Alarm, obs *weather.Observation) {
 	logger.Debug("Finished sending notifications for alarm '%s'", alarm.Name)
 }
 
-// Stop stops the alarm manager and file watcher
+// Stop stops the alarm manager and file watcher. It must be called at most
+// once: a second call panics on closing stopChan again.
 func (m *Manager) Stop() {
 	close(m.stopChan)
 	if m.watcher != nil {
@@ -420,7 +480,9 @@ func (m *Manager) Stop() {
 	logger.Info("Alarm manager stopped")
 }
 
-// GetConfig returns a copy of the current alarm configuration
+// GetConfig returns a copy of the current alarm configuration.
+// The copy is shallow: the Alarms slice and the credential pointers are shared
+// with the live config, so callers must treat it as read-only.
 func (m *Manager) GetConfig() *AlarmConfig {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -430,14 +492,14 @@ func (m *Manager) GetConfig() *AlarmConfig {
 	return &configCopy
 }
 
-// GetAlarmCount returns the number of configured alarms
+// GetAlarmCount returns the number of configured alarms, enabled or not.
 func (m *Manager) GetAlarmCount() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return len(m.config.Alarms)
 }
 
-// GetEnabledAlarmCount returns the number of enabled alarms
+// GetEnabledAlarmCount returns the number of enabled alarms.
 func (m *Manager) GetEnabledAlarmCount() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -451,7 +513,8 @@ func (m *Manager) GetEnabledAlarmCount() int {
 	return count
 }
 
-// GetConfigPath returns the alarm configuration file path
+// GetConfigPath returns the alarm configuration file path, or the literal
+// "Inline configuration" when the config was given as a JSON string.
 func (m *Manager) GetConfigPath() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -461,14 +524,17 @@ func (m *Manager) GetConfigPath() string {
 	return m.configPath
 }
 
-// GetLastLoadTime returns when the configuration was last loaded
+// GetLastLoadTime returns when the configuration was last loaded or reloaded.
 func (m *Manager) GetLastLoadTime() time.Time {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.lastLoadTime
 }
 
-// SetLocation sets the geographic location for sunrise/sunset calculations in schedules
+// SetLocation sets the geographic location for sunrise/sunset calculations in schedules.
+// latitude and longitude are in decimal degrees; until it is called the
+// location is 0,0, which sun schedules without their own coordinates treat
+// as unknown (always active).
 func (m *Manager) SetLocation(latitude, longitude float64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -477,7 +543,7 @@ func (m *Manager) SetLocation(latitude, longitude float64) {
 	logger.Debug("Alarm manager location set to: lat=%.4f, lon=%.4f", latitude, longitude)
 }
 
-// GetLocation returns the current location settings
+// GetLocation returns the current location settings in decimal degrees.
 func (m *Manager) GetLocation() (latitude, longitude float64) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

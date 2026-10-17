@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// Ensure parseDeviceObservations correctly maps multiple fields from the array
+// TestParseDeviceObservations_FieldMapping ensures parseDeviceObservations correctly maps multiple fields from the array.
 func TestParseDeviceObservations_FieldMapping(t *testing.T) {
 	data := [][]interface{}{
 		{float64(1620001000), 0.1, 1.2, 3.4, 90.0, 0.0, 1015.5, 19.5, 55.0, 100.0, 2.0, 0.0, 0.5, 1.0, 7.5, 1.0, 3.9, 60.0},
@@ -32,7 +32,7 @@ func TestParseDeviceObservations_FieldMapping(t *testing.T) {
 	}
 }
 
-// Verify filterToOneMinuteIncrements respects maxCount and returns chronological order
+// TestFilterToOneMinuteIncrements_MaxCountAndOrder verifies filterToOneMinuteIncrements respects maxCount and returns chronological order.
 func TestFilterToOneMinuteIncrements_MaxCountAndOrder(t *testing.T) {
 	var all []*Observation
 	base := int64(1620000000)
@@ -54,7 +54,7 @@ func TestFilterToOneMinuteIncrements_MaxCountAndOrder(t *testing.T) {
 	}
 }
 
-// Test error conditions for GetObservationFromURL: non-200, invalid JSON, and empty obs
+// TestGetObservationFromURL_Errors tests error conditions for GetObservationFromURL: non-200, invalid JSON, and empty obs.
 func TestGetObservationFromURL_Errors(t *testing.T) {
 	mux := http.NewServeMux()
 

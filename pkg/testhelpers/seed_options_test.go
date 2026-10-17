@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+// TestSeedOptionsDeterminism checks that the same options and seed give
+// identical temperatures across two runs.
 func TestSeedOptionsDeterminism(t *testing.T) {
 	opts := SeedOptions{Points: 3, TimeSpacing: 1 * time.Minute, TempNoise: 0.1, UVNoise: 1, RandSeed: 42, Location: "coastal"}
 	var a, b []weather.Observation
@@ -30,6 +32,8 @@ func TestSeedOptionsDeterminism(t *testing.T) {
 	}
 }
 
+// TestSeedOptions_RainAndLocationEffects checks that the coastal rain bias
+// gives at least as much accumulated rain as desert with the same seed.
 func TestSeedOptions_RainAndLocationEffects(t *testing.T) {
 	base := time.Now()
 	optsCoastal := SeedOptions{Points: 4, TimeSpacing: 1 * time.Minute, RandSeed: 99, Location: "coastal"}

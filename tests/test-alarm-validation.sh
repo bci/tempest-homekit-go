@@ -1,5 +1,18 @@
 #!/bin/bash
 # Test script for alarm JSON validation with timeout
+#
+# Runs the app seven times for at most 2 s each (`timeout 2s`) with a
+# missing @ prefix, malformed JSON, wrong structure, missing condition,
+# missing channels, and finally the valid @tempest-alarms.json, printing the
+# first matching error (or "Loaded alarm") lines for each. `timeout` is GNU
+# coreutils: absent on stock macOS, where every case prints nothing.
+#
+# Manual smoke test, not part of `go test` or CI: it prints results for a
+# person to read and exits 0 whether or not the checks pass. Run it from the
+# repository root after `go build` (it executes ./tempest-homekit-go and reads
+# ./tempest-alarms.json).
+#
+# Usage: ./tests/test-alarm-validation.sh
 
 echo "Testing Alarm JSON Validation"
 echo "=============================="

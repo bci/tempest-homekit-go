@@ -9,6 +9,8 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
+// TestNewManagerWithInlineJSON checks that NewManager accepts inline JSON, stores the
+// station name and loads the alarm.
 func TestNewManagerWithInlineJSON(t *testing.T) {
 	configJSON := `{
 		"alarms": [{
@@ -37,6 +39,8 @@ func TestNewManagerWithInlineJSON(t *testing.T) {
 	}
 }
 
+// TestNewManagerWithFile checks that NewManager loads alarms from an "@"-prefixed
+// temporary file.
 func TestNewManagerWithFile(t *testing.T) {
 	tmpfile, err := os.CreateTemp("", "alarm_test_*.json")
 	if err != nil {
@@ -81,6 +85,7 @@ func TestNewManagerWithFile(t *testing.T) {
 	}
 }
 
+// TestNewManagerInvalidJSON checks that NewManager rejects malformed inline JSON.
 func TestNewManagerInvalidJSON(t *testing.T) {
 	_, err := NewManager("{invalid json}", "Test Station")
 	if err == nil {
@@ -88,6 +93,8 @@ func TestNewManagerInvalidJSON(t *testing.T) {
 	}
 }
 
+// TestNewManagerNonexistentFile checks that NewManager errors when the "@" file does
+// not exist.
 func TestNewManagerNonexistentFile(t *testing.T) {
 	_, err := NewManager("@/nonexistent/path.json", "Test Station")
 	if err == nil {
@@ -95,6 +102,9 @@ func TestNewManagerNonexistentFile(t *testing.T) {
 	}
 }
 
+// TestProcessObservationSimple is a smoke test: it feeds a matching and a
+// non-matching observation to ProcessObservation and passes if neither panics. It makes
+// no assertions about firing.
 func TestProcessObservationSimple(t *testing.T) {
 	configJSON := `{
 		"alarms": [{
@@ -122,6 +132,8 @@ func TestProcessObservationSimple(t *testing.T) {
 	manager.ProcessObservation(obsCool)
 }
 
+// TestProcessObservationCooldown checks that an alarm cannot fire again immediately
+// after firing and can once its 2-second cooldown has passed. It sleeps for 3 seconds.
 func TestProcessObservationCooldown(t *testing.T) {
 	configJSON := `{
 		"alarms": [{
@@ -155,6 +167,8 @@ func TestProcessObservationCooldown(t *testing.T) {
 	}
 }
 
+// TestProcessObservationDisabledAlarm is a smoke test that processes a matching
+// observation against a disabled alarm; it makes no assertions.
 func TestProcessObservationDisabledAlarm(t *testing.T) {
 	configJSON := `{
 		"alarms": [{
@@ -176,6 +190,8 @@ func TestProcessObservationDisabledAlarm(t *testing.T) {
 	manager.ProcessObservation(obs)
 }
 
+// TestProcessObservationMultipleAlarms is a smoke test that processes one observation
+// matching three alarms, including a compound one; it makes no assertions.
 func TestProcessObservationMultipleAlarms(t *testing.T) {
 	configJSON := `{
 		"alarms": [
@@ -212,6 +228,8 @@ func TestProcessObservationMultipleAlarms(t *testing.T) {
 	manager.ProcessObservation(obs)
 }
 
+// TestProcessObservationInvalidCondition is a smoke test that processes an observation
+// against an alarm with an unknown field; it passes if nothing panics.
 func TestProcessObservationInvalidCondition(t *testing.T) {
 	configJSON := `{
 		"alarms": [{
@@ -233,6 +251,8 @@ func TestProcessObservationInvalidCondition(t *testing.T) {
 	manager.ProcessObservation(obs)
 }
 
+// TestManagerStop checks that a single Stop call does not panic. A second Stop is
+// deliberately not tested because it may panic on the already-closed channel.
 func TestManagerStop(t *testing.T) {
 	configJSON := `{
 		"alarms": [{
@@ -255,6 +275,8 @@ func TestManagerStop(t *testing.T) {
 	// This is acceptable behavior - just test that one call works
 }
 
+// TestProcessObservationCompoundConditions is a smoke test that feeds three
+// observations to AND and OR alarms; it makes no assertions about which fire.
 func TestProcessObservationCompoundConditions(t *testing.T) {
 	configJSON := `{
 		"alarms": [
@@ -297,6 +319,8 @@ func TestProcessObservationCompoundConditions(t *testing.T) {
 	manager.ProcessObservation(obs3)
 }
 
+// TestConfigReload checks that a file-backed Manager loads its initial alarm. Despite
+// the name, it does not rewrite the file or exercise reloading.
 func TestConfigReload(t *testing.T) {
 	tmpfile, err := os.CreateTemp("", "alarm_reload_test_*.json")
 	if err != nil {
@@ -341,6 +365,8 @@ func TestConfigReload(t *testing.T) {
 	}
 }
 
+// TestProcessObservationWithNilObservation calls ProcessObservation(nil) and only logs,
+// rather than fails, if it panics.
 func TestProcessObservationWithNilObservation(t *testing.T) {
 	configJSON := `{
 		"alarms": [{

@@ -8,6 +8,7 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
+// TestProcessObservationAir checks that an obs_air datagram yields an observation with the sent temperature and pressure.
 func TestProcessObservationAir(t *testing.T) {
 	l := NewUDPListener(50)
 
@@ -42,6 +43,7 @@ func TestProcessObservationAir(t *testing.T) {
 	}
 }
 
+// TestProcessObservationSky checks that an obs_sky datagram yields an observation with the sent illuminance and UV.
 func TestProcessObservationSky(t *testing.T) {
 	l := NewUDPListener(50)
 
@@ -81,6 +83,7 @@ func TestProcessObservationSky(t *testing.T) {
 	}
 }
 
+// TestProcessDeviceAndHubStatus checks device and hub status maps, serial number capture and a directly added observation.
 func TestProcessDeviceAndHubStatus(t *testing.T) {
 	l := NewUDPListener(50)
 

@@ -8,7 +8,9 @@ import (
 	"testing"
 )
 
-// helper to capture log output while running f()
+// captureLogOutput is a helper to capture log output while running f().
+// It redirects the standard logger to a buffer for the duration of f,
+// restores os.Stderr afterwards, and returns everything written.
 func captureLogOutput(f func()) string {
 	var buf bytes.Buffer
 	// set log output to buffer
@@ -19,6 +21,7 @@ func captureLogOutput(f func()) string {
 	return buf.String()
 }
 
+// TestSetLogFilterAndShouldLogBehavior checks that a filter suppresses messages not containing the filter string.
 func TestSetLogFilterAndShouldLogBehavior(t *testing.T) {
 	// Ensure clean state
 	SetLogFilter("")
@@ -42,6 +45,7 @@ func TestSetLogFilterAndShouldLogBehavior(t *testing.T) {
 	SetLogFilter("")
 }
 
+// TestInfoAndDebugLevelFiltering checks that Debug is suppressed at info level and both Debug and Info log at debug level.
 func TestInfoAndDebugLevelFiltering(t *testing.T) {
 	SetLogFilter("")
 
@@ -72,6 +76,7 @@ func TestInfoAndDebugLevelFiltering(t *testing.T) {
 	SetLogLevel(LogLevelError)
 }
 
+// TestWarningAliasNormalization checks that level "warning" behaves as "warn": Warn logs, Info does not.
 func TestWarningAliasNormalization(t *testing.T) {
 	SetLogFilter("")
 
@@ -95,6 +100,7 @@ func TestWarningAliasNormalization(t *testing.T) {
 	SetLogLevel(LogLevelError)
 }
 
+// TestErrorAlwaysLogs checks that Error output appears at the default error level.
 func TestErrorAlwaysLogs(t *testing.T) {
 	SetLogFilter("")
 	SetLogLevel(LogLevelError)
@@ -107,6 +113,7 @@ func TestErrorAlwaysLogs(t *testing.T) {
 	}
 }
 
+// TestWarnLogLevel checks which of Error, Warn and Info are emitted at the error, warn and info levels.
 func TestWarnLogLevel(t *testing.T) {
 	SetLogFilter("")
 

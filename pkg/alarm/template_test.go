@@ -7,6 +7,8 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
+// TestExpandTemplate_Coverage checks that each template variable, and templates using
+// many of them, contains the expected formatted value.
 func TestExpandTemplate_Coverage(t *testing.T) {
 	alarm := &Alarm{
 		Name:        "Test Alarm",
@@ -113,6 +115,8 @@ func TestExpandTemplate_Coverage(t *testing.T) {
 	}
 }
 
+// TestExpandTemplate_MissingValues checks that an all-zero observation still renders,
+// with zero values and the station name.
 func TestExpandTemplate_MissingValues(t *testing.T) {
 	alarm := &Alarm{
 		Name: "Test",
@@ -134,6 +138,8 @@ func TestExpandTemplate_MissingValues(t *testing.T) {
 	}
 }
 
+// TestExpandTemplate_UnknownVariables checks that known variables are substituted while
+// unknown {{...}} placeholders are left as written.
 func TestExpandTemplate_UnknownVariables(t *testing.T) {
 	alarm := &Alarm{Name: "Test"}
 	obs := &weather.Observation{AirTemperature: 20.0}
@@ -156,6 +162,8 @@ func TestExpandTemplate_UnknownVariables(t *testing.T) {
 	}
 }
 
+// TestExpandTemplate_EmptyTemplate checks that an empty template expands to an empty
+// string.
 func TestExpandTemplate_EmptyTemplate(t *testing.T) {
 	alarm := &Alarm{Name: "Test"}
 	obs := &weather.Observation{}
@@ -167,6 +175,8 @@ func TestExpandTemplate_EmptyTemplate(t *testing.T) {
 	}
 }
 
+// TestExpandTemplate_NoVariables checks that a template without placeholders is returned
+// unchanged.
 func TestExpandTemplate_NoVariables(t *testing.T) {
 	alarm := &Alarm{Name: "Test"}
 	obs := &weather.Observation{}
@@ -180,6 +190,8 @@ func TestExpandTemplate_NoVariables(t *testing.T) {
 	}
 }
 
+// TestExpandTemplate_LastValues_TriggerContext checks that each {{last_*}} variable
+// renders the value stored in the alarm's trigger context next to the current value.
 func TestExpandTemplate_LastValues_TriggerContext(t *testing.T) {
 	alarm := &Alarm{
 		Name: "Test",
@@ -289,6 +301,8 @@ func TestExpandTemplate_LastValues_TriggerContext(t *testing.T) {
 	}
 }
 
+// TestExpandTemplate_LastValues_NoTriggerContext checks that {{last_temperature}} renders
+// "N/A" when the alarm has neither a trigger context nor a previous value.
 func TestExpandTemplate_LastValues_NoTriggerContext(t *testing.T) {
 	alarm := &Alarm{
 		Name: "Test",
@@ -312,6 +326,8 @@ func TestExpandTemplate_LastValues_NoTriggerContext(t *testing.T) {
 	}
 }
 
+// TestExpandTemplate_LastValues_PreviousValue checks that {{last_*}} variables fall back
+// to the alarm's previous values when no trigger context is set.
 func TestExpandTemplate_LastValues_PreviousValue(t *testing.T) {
 	alarm := &Alarm{
 		Name: "Test",

@@ -4,6 +4,7 @@ import (
 	"testing"
 )
 
+// TestGeneratedStationURLConstruction checks that a localhost station URL built from WebPort and GeneratedWeatherPath has the expected form. It reproduces the URL construction locally rather than calling LoadConfig.
 func TestGeneratedStationURLConstruction(t *testing.T) {
 	cfg := &Config{
 		WebPort:              "3000",

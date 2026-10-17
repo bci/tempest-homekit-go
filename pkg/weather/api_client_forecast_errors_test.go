@@ -6,6 +6,7 @@ import (
 	"testing"
 )
 
+// TestGetForecast_Non200 checks that GetForecast fails on an HTTP 500.
 func TestGetForecast_Non200(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -22,6 +23,7 @@ func TestGetForecast_Non200(t *testing.T) {
 	}
 }
 
+// TestGetForecast_MalformedJSON checks that GetForecast fails on invalid JSON.
 func TestGetForecast_MalformedJSON(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -38,6 +40,7 @@ func TestGetForecast_MalformedJSON(t *testing.T) {
 	}
 }
 
+// TestGetObservationFromURL_MalformedJSON_Error checks that GetObservationFromURL fails on invalid JSON.
 func TestGetObservationFromURL_MalformedJSON_Error(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -54,6 +57,7 @@ func TestGetObservationFromURL_MalformedJSON_Error(t *testing.T) {
 	}
 }
 
+// TestGetTempestDeviceID_NoTempest checks that a station without an ST device yields an error.
 func TestGetTempestDeviceID_NoTempest(t *testing.T) {
 	s := &Station{StationID: 1, Devices: []Device{{DeviceID: 10, DeviceType: "HB"}}}
 	if _, err := GetTempestDeviceID(s); err == nil {

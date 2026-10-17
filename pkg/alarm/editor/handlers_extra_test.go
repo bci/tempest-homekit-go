@@ -11,6 +11,9 @@ import (
 	"tempest-homekit-go/pkg/alarm"
 )
 
+// TestCreateUpdateDeleteAlarm_Workflow drives create, rename-via-oldName
+// update and delete through the handlers and checks the list after each step
+// and the zero-alarm file left on disk.
 func TestCreateUpdateDeleteAlarm_Workflow(t *testing.T) {
 	tmpfile, err := os.CreateTemp("", "alarms_editor_test_*.json")
 	if err != nil {
@@ -103,6 +106,9 @@ func TestCreateUpdateDeleteAlarm_Workflow(t *testing.T) {
 	}
 }
 
+// TestHandleSaveConfig_InvalidConfig_ReturnsBadRequest checks that
+// handleSaveConfig rejects a config that fails Validate (an alarm with no
+// channels) with a non-200 status.
 func TestHandleSaveConfig_InvalidConfig_ReturnsBadRequest(t *testing.T) {
 	tmpfile, err := os.CreateTemp("", "alarms_editor_test_save_*.json")
 	if err != nil {
@@ -127,6 +133,8 @@ func TestHandleSaveConfig_InvalidConfig_ReturnsBadRequest(t *testing.T) {
 	}
 }
 
+// TestHandleGetEnvDefaults_ReturnsEnvValues checks that handleGetEnvDefaults
+// reports MS365_TO_ADDRESS and SMS_TO_NUMBER as emailTo and smsTo.
 func TestHandleGetEnvDefaults_ReturnsEnvValues(t *testing.T) {
 	_ = os.Setenv("MS365_TO_ADDRESS", "foo@example.com")
 	_ = os.Setenv("SMS_TO_NUMBER", "+15551234567")
@@ -156,6 +164,9 @@ func TestHandleGetEnvDefaults_ReturnsEnvValues(t *testing.T) {
 	}
 }
 
+// TestHandleGetContacts_ReturnsContactList checks that contacts loaded from
+// the CONTACT_LIST environment variable are returned with all fields, sorted
+// by name.
 func TestHandleGetContacts_ReturnsContactList(t *testing.T) {
 	// Set up test contact list
 	contactListJSON := `[
@@ -197,6 +208,8 @@ func TestHandleGetContacts_ReturnsContactList(t *testing.T) {
 	}
 }
 
+// TestHandleGetContacts_EmptyList checks that handleGetContacts returns an
+// empty JSON array when no CONTACT_LIST is configured.
 func TestHandleGetContacts_EmptyList(t *testing.T) {
 	// No CONTACT_LIST environment variable set
 	server := &Server{}

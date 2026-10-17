@@ -1,3 +1,7 @@
+// This file holds tests but, lacking the _test.go suffix, is compiled into the
+// production package (it imports net/http/httptest and testing). Its tests
+// duplicate those in client_test.go.
+
 package weather
 
 import (
@@ -8,6 +12,7 @@ import (
 	"time"
 )
 
+// TestGetFloat64AndGetInt_Simple checks nil and numeric conversions of the JSON value helpers.
 func TestGetFloat64AndGetInt_Simple(t *testing.T) {
 	if got := getFloat64(nil); got != 0.0 {
 		t.Fatalf("expected 0.0 for nil, got %v", got)
@@ -24,6 +29,7 @@ func TestGetFloat64AndGetInt_Simple(t *testing.T) {
 	}
 }
 
+// TestParseDeviceObservations_Simple checks that a full 18-value device row is parsed.
 func TestParseDeviceObservations_Simple(t *testing.T) {
 	ts := float64(time.Now().Unix())
 	arr := make([]interface{}, 18)
@@ -49,6 +55,7 @@ func TestParseDeviceObservations_Simple(t *testing.T) {
 	}
 }
 
+// TestFindStationAndDeviceID checks lookup by Name and finding the Tempest device among several.
 func TestFindStationAndDeviceID(t *testing.T) {
 	stations := []Station{
 		{StationID: 1, Name: "Alpha", StationName: "AlphaStation", Devices: []Device{{DeviceID: 10, DeviceType: "HB"}}},
@@ -68,6 +75,7 @@ func TestFindStationAndDeviceID(t *testing.T) {
 	}
 }
 
+// TestGetObservationFromURL_Basic checks that GetObservationFromURL decodes an observation from a local server.
 func TestGetObservationFromURL_Basic(t *testing.T) {
 	now := time.Now().Unix()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -88,6 +96,7 @@ func TestGetObservationFromURL_Basic(t *testing.T) {
 	}
 }
 
+// TestGetObservationFromURL_NoObs checks that an empty obs array is an error.
 func TestGetObservationFromURL_NoObs(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

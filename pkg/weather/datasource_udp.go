@@ -1,4 +1,5 @@
-// Package weather provides the UDP data source implementation.
+// This file provides the UDP data source implementation.
+
 package weather
 
 import (
@@ -8,7 +9,22 @@ import (
 	"tempest-homekit-go/pkg/logger"
 )
 
-// UDPListener is an interface to avoid import cycle with pkg/udp
+// UDPListener is an interface to avoid import cycle with pkg/udp. It is the subset
+// of *udp.UDPListener that UDPDataSource needs; see that type for full
+// semantics.
+//
+// Methods:
+//
+//   - Start begins receiving broadcasts.
+//   - Stop stops receiving broadcasts.
+//   - GetLatestObservation returns the most recent observation, or nil.
+//   - GetStats returns packet count, last packet time, station IP and device
+//     serial number.
+//   - GetObservations returns the stored observation history.
+//   - IsReceivingData reports whether data has arrived recently.
+//   - ObservationChannel delivers each new observation.
+//   - GetDeviceStatus and GetHubStatus return the latest device and hub status
+//     as a map[string]interface{}, or nil if none has been received.
 type UDPListener interface {
 	Start() error
 	Stop() error
@@ -21,7 +37,18 @@ type UDPListener interface {
 	GetHubStatus() interface{}
 }
 
-// UDPDataSource implements DataSource for local UDP broadcast listening
+// UDPDataSource implements DataSource for local UDP broadcast listening. It
+// forwards observations from a UDPListener, pushes the listener's device and hub
+// status to an optional StatusManager, and, when internet access and a token are
+// available, polls the WeatherFlow forecast every 30 minutes. It is safe for
+// concurrent use.
+//
+// Fields: listener supplies the broadcasts; noInternet, stationID and token
+// control forecast polling (it needs all three); statusManager receives status
+// updates (nil to disable); mu guards the fields below it; latestObservation
+// and latestForecast hold the most recent data; observationChan (buffer 100)
+// delivers observations and is closed by Stop; stopChan is closed by Stop to
+// end the background loops; running is true between Start and Stop.
 type UDPDataSource struct {
 	listener      UDPListener
 	noInternet    bool
@@ -38,7 +65,9 @@ type UDPDataSource struct {
 }
 
 // NewUDPDataSource creates a new UDP-based data source
-// Pass in an already-created UDP listener to avoid import cycle
+// Pass in an already-created UDP listener to avoid import cycle. noInternet
+// disables forecast polling; stationID and token are only used for forecasts.
+// Call Start to begin.
 func NewUDPDataSource(listener UDPListener, noInternet bool, stationID int, token string) *UDPDataSource {
 	return &UDPDataSource{
 		listener:        listener,
@@ -50,7 +79,10 @@ func NewUDPDataSource(listener UDPListener, noInternet bool, stationID int, toke
 	}
 }
 
-// Start begins listening for UDP broadcasts
+// Start begins listening for UDP broadcasts by starting the listener and the
+// forwarding loop (plus the forecast loop when online with a token), and returns
+// the observation channel. Calling it while running returns the same channel.
+// It returns the listener's error, for example when UDP port 50222 is in use.
 func (u *UDPDataSource) Start() (<-chan Observation, error) {
 	u.mu.Lock()
 	if u.running {
@@ -81,7 +113,9 @@ func (u *UDPDataSource) Start() (<-chan Observation, error) {
 	return u.observationChan, nil
 }
 
-// Stop gracefully shuts down the UDP data source
+// Stop gracefully shuts down the UDP data source: it stops the background loops
+// and the listener and closes the observation channel. It is a no-op if not
+// running and always returns nil (listener errors are ignored).
 func (u *UDPDataSource) Stop() error {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -103,7 +137,8 @@ func (u *UDPDataSource) Stop() error {
 	return nil
 }
 
-// GetLatestObservation returns the most recent observation
+// GetLatestObservation returns the most recent observation forwarded by this data
+// source, falling back to the listener's latest observation, or nil.
 func (u *UDPDataSource) GetLatestObservation() *Observation {
 	u.mu.RLock()
 	defer u.mu.RUnlock()
@@ -127,7 +162,9 @@ func (u *UDPDataSource) GetForecast() *ForecastResponse {
 	return u.latestForecast
 }
 
-// GetStatus returns the current status of the UDP data source
+// GetStatus returns the current status of the UDP data source, taking packet
+// count, last packet time, station IP, serial number and observation count from
+// the listener.
 func (u *UDPDataSource) GetStatus() DataSourceStatus {
 	u.mu.RLock()
 	defer u.mu.RUnlock()
@@ -157,7 +194,7 @@ func (u *UDPDataSource) GetType() DataSourceType {
 	return DataSourceUDP
 }
 
-// SetStatusManager sets the status manager for UDP status updates
+// SetStatusManager sets the status manager for UDP status updates; pass nil to stop updates.
 func (u *UDPDataSource) SetStatusManager(sm *StatusManager) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -165,6 +202,9 @@ func (u *UDPDataSource) SetStatusManager(sm *StatusManager) {
 }
 
 // forwardLoop forwards observations from UDP listener to the data source channel
+// (non-blocking; dropped if full), recording each as the latest and pushing UDP
+// status to the status manager. It also refreshes status every 30 seconds, and
+// exits when stopChan or the listener's channel is closed.
 func (u *UDPDataSource) forwardLoop() {
 	logger.Info("Starting UDP observation forwarding loop with periodic status updates (30s interval)")
 
@@ -210,7 +250,7 @@ func (u *UDPDataSource) forwardLoop() {
 	}
 }
 
-// forecastLoop periodically fetches forecast data (only if internet enabled)
+// forecastLoop periodically fetches forecast data (only if internet enabled): once at start and then every 30 minutes until stopChan is closed.
 func (u *UDPDataSource) forecastLoop() {
 	logger.Info("Starting forecast polling loop (30 minute interval)")
 
@@ -232,7 +272,9 @@ func (u *UDPDataSource) forecastLoop() {
 	}
 }
 
-// updateStatusFromUDP retrieves device and hub status from UDP listener and updates status manager
+// updateStatusFromUDP retrieves device and hub status from UDP listener and updates status manager.
+// It converts the listener's map form into UDPDeviceStatus/UDPHubStatus and does
+// nothing if there is no status manager or neither status is available.
 func (u *UDPDataSource) updateStatusFromUDP() {
 	u.mu.RLock()
 	statusManager := u.statusManager
@@ -284,7 +326,9 @@ func (u *UDPDataSource) updateStatusFromUDP() {
 	}
 }
 
-// fetchForecast retrieves forecast data from the API
+// fetchForecast retrieves forecast data from the API and stores it. It is skipped
+// in offline mode or without a token or station ID; errors are logged and the
+// previous forecast is kept.
 func (u *UDPDataSource) fetchForecast() {
 	if u.noInternet || u.token == "" || u.stationID == 0 {
 		logger.Debug("Skipping forecast fetch (offline mode, no token, or no station ID)")
@@ -306,7 +350,10 @@ func (u *UDPDataSource) fetchForecast() {
 	logger.Debug("Successfully fetched forecast data")
 }
 
-// Helper functions for converting map values (prefixed to avoid name conflicts)
+// Helper functions for converting map values (prefixed to avoid name conflicts).
+
+// getMapInt64 returns m[key] as an int64 if it holds an int64, int or float64,
+// and 0 if the key is missing or of another type.
 func getMapInt64(m map[string]interface{}, key string) int64 {
 	if v, ok := m[key]; ok {
 		switch val := v.(type) {
@@ -321,6 +368,7 @@ func getMapInt64(m map[string]interface{}, key string) int64 {
 	return 0
 }
 
+// getMapInt returns m[key] as an int if it holds an int, int64 or float64, and 0 otherwise.
 func getMapInt(m map[string]interface{}, key string) int {
 	if v, ok := m[key]; ok {
 		switch val := v.(type) {
@@ -335,6 +383,7 @@ func getMapInt(m map[string]interface{}, key string) int {
 	return 0
 }
 
+// getMapFloat64 returns m[key] as a float64 if it holds a float64, int or int64, and 0 otherwise.
 func getMapFloat64(m map[string]interface{}, key string) float64 {
 	if v, ok := m[key]; ok {
 		switch val := v.(type) {
@@ -349,6 +398,7 @@ func getMapFloat64(m map[string]interface{}, key string) float64 {
 	return 0
 }
 
+// getMapString returns m[key] if it holds a string, and "" otherwise.
 func getMapString(m map[string]interface{}, key string) string {
 	if v, ok := m[key]; ok {
 		if s, ok := v.(string); ok {

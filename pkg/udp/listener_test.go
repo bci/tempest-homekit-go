@@ -9,11 +9,13 @@ import (
 
 // Clean, minimal tests for pkg/udp.
 
+// sampleObsSTJSON returns a raw obs_st datagram with serial SN123 and a full 18-value observation row.
 func sampleObsSTJSON() []byte {
 	j := `{"serial_number":"SN123","type":"obs_st","obs":[[1600000000,0,1.2,2.3,180,3,1012.5,20.5,50,1000,2,0,0.5,0,5.0,1,3.7,60]]}`
 	return []byte(j)
 }
 
+// TestFlexInt_UnmarshalInt checks that FlexInt decodes a JSON number.
 func TestFlexInt_UnmarshalInt(t *testing.T) {
 	var fi FlexInt
 	if err := json.Unmarshal([]byte("35"), &fi); err != nil {
@@ -24,6 +26,7 @@ func TestFlexInt_UnmarshalInt(t *testing.T) {
 	}
 }
 
+// TestFlexInt_UnmarshalStringNumber checks that FlexInt decodes a numeric JSON string.
 func TestFlexInt_UnmarshalStringNumber(t *testing.T) {
 	var fi FlexInt
 	if err := json.Unmarshal([]byte("\"42\""), &fi); err != nil {
@@ -34,6 +37,7 @@ func TestFlexInt_UnmarshalStringNumber(t *testing.T) {
 	}
 }
 
+// TestPrettyPrintMessage_obs_st checks that the pretty-printed obs_st line includes the serial number.
 func TestPrettyPrintMessage_obs_st(t *testing.T) {
 	out := PrettyPrintMessage(sampleObsSTJSON())
 	if out == "" {
@@ -44,6 +48,7 @@ func TestPrettyPrintMessage_obs_st(t *testing.T) {
 	}
 }
 
+// TestNewUDPListenerAndProcessObservationST checks that an obs_st datagram produces a latest observation.
 func TestNewUDPListenerAndProcessObservationST(t *testing.T) {
 	l := NewUDPListener(50)
 	if l == nil {
@@ -79,6 +84,7 @@ func TestNewUDPListenerAndProcessObservationST(t *testing.T) {
 	}
 }
 
+// TestUDPListener_DeviceAndHubStatus checks that raw device_status and hub_status JSON populate the status maps.
 func TestUDPListener_DeviceAndHubStatus(t *testing.T) {
 	l := NewUDPListener(10)
 

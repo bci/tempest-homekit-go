@@ -7,6 +7,8 @@ import (
 )
 
 // TestUnitConversionTemperature tests temperature unit conversions (F to C)
+// in conditions: F/f thresholds are converted to Celsius, C/c and bare numbers are taken
+// as Celsius, and mixed units work inside compound conditions.
 func TestUnitConversionTemperature(t *testing.T) {
 	evaluator := NewEvaluator()
 
@@ -104,6 +106,8 @@ func TestUnitConversionTemperature(t *testing.T) {
 }
 
 // TestUnitConversionWindSpeed tests wind speed unit conversions (mph to m/s)
+// in conditions: mph in any case is converted, m/s, M/S, "ms" and bare numbers are taken
+// as m/s, and mixed units work inside compound conditions.
 func TestUnitConversionWindSpeed(t *testing.T) {
 	evaluator := NewEvaluator()
 
@@ -207,7 +211,9 @@ func TestUnitConversionWindSpeed(t *testing.T) {
 	}
 }
 
-// TestParseValueWithUnits tests the unit parsing function directly
+// TestParseValueWithUnits tests the unit parsing function directly:
+// parseValueWithUnits converts by field, leaves fields without units unchanged and
+// errors on unparseable input.
 func TestParseValueWithUnits(t *testing.T) {
 	evaluator := NewEvaluator()
 
@@ -272,7 +278,8 @@ func TestParseValueWithUnits(t *testing.T) {
 	}
 }
 
-// TestRealWorldScenarios tests practical alarm conditions
+// TestRealWorldScenarios tests practical alarm conditions such as heat, freeze,
+// high-wind and comfort-range alerts written with Fahrenheit and mph thresholds.
 func TestRealWorldScenarios(t *testing.T) {
 	evaluator := NewEvaluator()
 

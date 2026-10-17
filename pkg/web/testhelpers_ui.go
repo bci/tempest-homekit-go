@@ -18,6 +18,14 @@ import (
 // asserts the synthesized popout has the main data at datasets[0] (same length
 // as dashboard main dataset) and the average dashed two-point horizontal line
 // at datasets[1]. This is exported so other UI tests can reuse it.
+//
+// browserCtx must be a chromedp context whose page is the dashboard served by ts, with
+// charts already rendered: the popout config is built in-page from charts.<chartType>,
+// then the browser navigates to ts.URL + "/chart/<chartType>?config=...". expectedDashLen
+// is the dashboard's main-dataset length that the popout's datasets[0] must match.
+// Failures are reported with t.Fatalf. It polls up to about 4 seconds for the popout
+// chart to appear. It lives in a non-test file (behind the !no_browser build tag) so it
+// can be shared, which makes chromedp and testing dependencies of the default build.
 func AssertPopoutDatasetOrdering(t *testing.T, browserCtx context.Context, ts *httptest.Server, chartType string, expectedDashLen int) {
 	// Build cfg JSON in-page from charts.<chartType> metadata
 	// create simple Title-case for the chart title (avoid deprecated strings.Title)

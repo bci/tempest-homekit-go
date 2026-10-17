@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// helper to route default transport to given test server
+// routeTransportToServer is a helper to route the default transport to the given test server; it returns a function that restores the original transport.
 func routeTransportToServer(srv *httptest.Server) func() {
 	old := http.DefaultTransport
 	target, _ := url.Parse(srv.URL)
@@ -20,6 +20,7 @@ func routeTransportToServer(srv *httptest.Server) func() {
 	return func() { http.DefaultTransport = old }
 }
 
+// TestAPIDataSource_FetchObservation_CustomURL checks that fetchObservation from a custom URL stores the observation and counts it.
 func TestAPIDataSource_FetchObservation_CustomURL(t *testing.T) {
 	obsJSON := `{"obs":[{"timestamp": 1696761600, "wind_avg": 2.5, "brightness": 100, "uv": 3, "precip": 0.0, "precipitation_type": 0, "battery": 3.8, "report_interval": 60}]}`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -41,6 +42,7 @@ func TestAPIDataSource_FetchObservation_CustomURL(t *testing.T) {
 	}
 }
 
+// TestAPIDataSource_FetchForecast_WithTransportOverride checks that fetchForecast stores the forecast returned by the API.
 func TestAPIDataSource_FetchForecast_WithTransportOverride(t *testing.T) {
 	// Create a forecast response
 	fr := ForecastResponse{
@@ -70,6 +72,7 @@ func TestAPIDataSource_FetchForecast_WithTransportOverride(t *testing.T) {
 	}
 }
 
+// TestFilterToOneMinuteIncrements_EdgeCases checks empty and single-element inputs.
 func TestFilterToOneMinuteIncrements_EdgeCases(t *testing.T) {
 	// Empty input
 	empty := []*Observation{}
@@ -86,6 +89,7 @@ func TestFilterToOneMinuteIncrements_EdgeCases(t *testing.T) {
 	}
 }
 
+// TestParseStationStatusHTML_AltBatteryPattern checks that the fallback battery pattern extracts status and voltage.
 func TestParseStationStatusHTML_AltBatteryPattern(t *testing.T) {
 	html := `<div id="diagnostic-info">Battery Voltage<span class="lv-value-display">Good (2.69v)</span></div>`
 	status, err := parseStationStatusHTML(html, "debug")

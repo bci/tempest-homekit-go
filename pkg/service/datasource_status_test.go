@@ -8,6 +8,7 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
+// TestCreateDataSource_UDPStatusReflectsListener checks that a UDP data source status reports the listener packet count, serial, IP and observation count.
 func TestCreateDataSource_UDPStatusReflectsListener(t *testing.T) {
 	cfg := &config.Config{UDPStream: true, DisableInternet: true}
 	station := mockStation()

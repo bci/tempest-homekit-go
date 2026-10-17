@@ -5,6 +5,10 @@ import (
 	"testing"
 )
 
+// TestLoadConfigFromEnv checks LoadConfigFromEnv for SMTP, Microsoft 365 and Twilio
+// environment variables, that it returns nil Email and SMS configs when none are set, and
+// that LoadAlarmConfig lets SMTP_* environment variables override the email block in the
+// JSON. The original values of every variable it touches are restored afterwards.
 func TestLoadConfigFromEnv(t *testing.T) {
 	// Save original env vars
 	origVars := map[string]string{

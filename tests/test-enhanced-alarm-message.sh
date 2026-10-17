@@ -1,6 +1,19 @@
 #!/bin/bash
 
 # Test script to verify enhanced alarm message with description and last values
+#
+# Starts the app on web port 8084 with --alarms @tempest-alarms.json, waits
+# 130 s for two live observations, stops it, and checks that the "Lux Change"
+# console notification shows the alarm description on its second line and a
+# "Previous LUX:" value (the last_lux template variable). Needs network access
+# (WeatherFlow API). Log: /tmp/enhanced-alarm-test.log.
+#
+# Manual smoke test, not part of `go test` or CI: it prints results for a
+# person to read and exits 0 whether or not the checks pass. Run it from the
+# repository root after `go build` (it executes ./tempest-homekit-go and reads
+# ./tempest-alarms.json).
+#
+# Usage: ./tests/test-enhanced-alarm-message.sh
 echo "=========================================="
 echo "Testing Enhanced Alarm Messages"
 echo "=========================================="

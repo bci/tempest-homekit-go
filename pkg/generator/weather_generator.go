@@ -1,5 +1,12 @@
 // Package generator provides synthetic weather data generation for UI testing.
 // It creates realistic weather patterns based on different seasons and locations.
+//
+// A WeatherGenerator picks (or is given) a Location and Season, derives base
+// temperature, pressure and humidity from them, and then produces
+// types.Observation values with diurnal variation and random noise. Optional
+// per-sensor TestPattern cycles override the random values with fixed,
+// predictable steps so that UI and HomeKit behaviour can be checked by eye.
+// A WeatherGenerator is not safe for concurrent use.
 package generator
 
 import (
@@ -10,39 +17,57 @@ import (
 	"tempest-homekit-go/pkg/types"
 )
 
-// Season represents different weather seasons
+// Season represents different weather seasons. It biases the generated
+// temperature, wind, light, UV, solar radiation and rain probability.
 type Season int
 
+// Season values. They are contiguous from zero so that a random season can
+// be chosen with rand.Intn(4).
 const (
-	Spring Season = iota
-	Summer
-	Fall
-	Winter
+	Spring Season = iota // Mild and windy, second-highest rain chance
+	Summer               // Warmest and calmest, strongest light and UV
+	Fall                 // Mild, moderate wind and rain
+	Winter               // Coldest and windiest, highest rain chance
 )
 
+// String returns the season's name ("Spring", "Summer", "Fall" or "Winter").
+// It panics if s is outside the defined range.
 func (s Season) String() string {
 	seasons := []string{"Spring", "Summer", "Fall", "Winter"}
 	return seasons[s]
 }
 
-// Location represents different climate locations
+// Location represents different climate locations used to seed generated
+// weather.
+//
+// ClimateZone values recognised by the generator are "Tropical",
+// "Subtropical", "Desert", "Oceanic", "Continental", "Mediterranean" and
+// "Subarctic"; other values get default behaviour.
 type Location struct {
-	Name        string
-	Latitude    float64
-	Longitude   float64
-	Elevation   float64
-	ClimateZone string
+	Name        string  // Human-readable place name, e.g. "Denver, CO"
+	Latitude    float64 // Decimal degrees; shifts base temperature and scales UV
+	Longitude   float64 // Decimal degrees; informational, not used by the generator
+	Elevation   float64 // Metres; reduces station pressure from sea level
+	ClimateZone string  // Climate zone name selecting humidity, rain, wind and temperature adjustments
 }
 
-// WeatherGenerator generates synthetic weather data
+// WeatherGenerator generates synthetic weather data.
+//
+// Create one with NewWeatherGenerator or NewWeatherGeneratorWithParams; the
+// zero value has no random source and will panic.
+//
+// Unexported state: history is the last series from GenerateHistoricalData
+// (cleared by Regenerate); rng is the private clock-seeded random source;
+// the testPattern* fields hold the per-sensor test pattern enabled by
+// EnableTestPattern, nil meaning normal random generation for that sensor.
 type WeatherGenerator struct {
-	Location               Location
-	Season                 Season
-	CurrentTime            time.Time
-	BaseTemperature        float64 // Celsius
-	BasePressure           float64 // mb
-	BaseHumidity           float64 // %
-	current                *types.Observation
+	Location               Location           // Simulated station location
+	Season                 Season             // Simulated season
+	CurrentTime            time.Time          // Observation time; zero means time.Now(). Stepped and restored by GenerateHistoricalData
+	BaseTemperature        float64            // Celsius
+	BasePressure           float64            // mb
+	BaseHumidity           float64            // %
+	current                *types.Observation // Most recent observation from GenerateObservation
 	history                []*types.Observation
 	rng                    *rand.Rand
 	cumulativeRain         float64 // Total accumulated rain since station start (like real Tempest)
@@ -59,7 +84,8 @@ type WeatherGenerator struct {
 	testPatternLightning   *TestPattern
 }
 
-// Predefined locations with different climates
+// Locations lists predefined locations with different climates, from which
+// NewWeatherGenerator and Regenerate choose at random.
 var Locations = []Location{
 	{
 		Name: "Miami, FL", Latitude: 25.7617, Longitude: -80.1918, Elevation: 2.0,
@@ -95,7 +121,10 @@ var Locations = []Location{
 	},
 }
 
-// NewWeatherGenerator creates a new weather generator with random location and season
+// NewWeatherGenerator creates a new weather generator with random location and season.
+//
+// The random source is seeded from the current time, so results are not
+// reproducible. CurrentTime is set to time.Now().
 func NewWeatherGenerator() *WeatherGenerator {
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
@@ -114,7 +143,10 @@ func NewWeatherGenerator() *WeatherGenerator {
 	return wg
 }
 
-// NewWeatherGeneratorWithParams creates a weather generator with specific location and season
+// NewWeatherGeneratorWithParams creates a weather generator with specific location and season.
+//
+// location and season fix the climate; base values are still randomised from
+// a clock-seeded source. CurrentTime is set to time.Now().
 func NewWeatherGeneratorWithParams(location Location, season Season) *WeatherGenerator {
 	wg := &WeatherGenerator{
 		Location:    location,
@@ -127,7 +159,12 @@ func NewWeatherGeneratorWithParams(location Location, season Season) *WeatherGen
 	return wg
 }
 
-// initializeBaseValues sets realistic base values based on location and season
+// initializeBaseValues sets realistic base values based on location and season.
+//
+// It sets BaseTemperature, BasePressure and BaseHumidity, seeds the
+// cumulative rain counter with 1.5-9.5 inches (stored in mm) of pre-existing
+// accumulation, zeroes the daily rain total and records CurrentTime's day
+// of year for the midnight reset.
 func (wg *WeatherGenerator) initializeBaseValues() {
 	// Set base temperature based on location and season
 	wg.BaseTemperature = wg.getSeasonalTemperature()
@@ -144,7 +181,10 @@ func (wg *WeatherGenerator) initializeBaseValues() {
 	wg.lastDayCheck = wg.CurrentTime.YearDay()              // Track current day
 }
 
-// getSeasonalTemperature returns realistic temperatures for location and season
+// getSeasonalTemperature returns realistic temperatures for location and season.
+//
+// The result is in °C: a 15 °C baseline adjusted for latitude, season (with
+// randomness) and climate zone, then clamped to -25..42 °C.
 func (wg *WeatherGenerator) getSeasonalTemperature() float64 {
 	baseTemp := 15.0 // Default 15°C (59°F)
 
@@ -187,7 +227,8 @@ func (wg *WeatherGenerator) getSeasonalTemperature() float64 {
 	return baseTemp
 }
 
-// getClimateHumidity returns realistic humidity for the climate zone
+// getClimateHumidity returns realistic humidity for the climate zone as a
+// random percentage within a zone-specific range (50-80% for unknown zones).
 func (wg *WeatherGenerator) getClimateHumidity() float64 {
 	switch wg.Location.ClimateZone {
 	case "Tropical", "Subtropical":
@@ -207,12 +248,22 @@ func (wg *WeatherGenerator) getClimateHumidity() float64 {
 	}
 }
 
-// SetCurrentWeatherMode ensures the generator is in current weather mode (not historical)
+// SetCurrentWeatherMode ensures the generator is in current weather mode (not historical).
+//
+// In current mode, rain updates the daily rain total and test patterns use
+// the wall clock.
 func (wg *WeatherGenerator) SetCurrentWeatherMode() {
 	wg.isGeneratingHistorical = false
 }
 
-// GenerateObservation creates a single realistic weather observation
+// GenerateObservation creates a single realistic weather observation.
+//
+// It uses CurrentTime (or time.Now() when CurrentTime is zero) for diurnal
+// effects and the timestamp, then applies any enabled test patterns, which
+// overwrite the corresponding random values. RainAccumulated is set to the
+// generator's cumulative rain since start, not the per-observation
+// increment. The observation is stored as the generator's current value and
+// returned.
 func (wg *WeatherGenerator) GenerateObservation() *types.Observation {
 	// Use CurrentTime if set (for historical data), otherwise use current time
 	observationTime := wg.CurrentTime
@@ -323,7 +374,10 @@ func (wg *WeatherGenerator) GenerateObservation() *types.Observation {
 	return obs
 }
 
-// generateWind creates realistic wind patterns
+// generateWind creates realistic wind patterns.
+//
+// It returns an average wind speed: a random 2-10 base scaled by season and
+// climate zone. GenerateObservation stores it in WindAvg, which is m/s.
 func (wg *WeatherGenerator) generateWind() float64 {
 	baseWind := 2.0 + wg.rng.Float64()*8 // 2-10 mph base
 
@@ -352,7 +406,11 @@ func (wg *WeatherGenerator) generateWind() float64 {
 	return baseWind
 }
 
-// generateIlluminance creates realistic light levels
+// generateIlluminance creates realistic light levels.
+//
+// It returns lux for the hour of t: 0-10 at night (before 06:00 or after
+// 20:59), 50-250 at dawn and dusk (06, 07, 19 and 20 h), and a seasonal
+// clear-sky baseline scaled by a random cloud factor during the day.
 func (wg *WeatherGenerator) generateIlluminance(t time.Time) float64 {
 	hour := t.Hour()
 
@@ -385,7 +443,10 @@ func (wg *WeatherGenerator) generateIlluminance(t time.Time) float64 {
 	return baseLux*cloudFactor + wg.rng.Float64()*5000
 }
 
-// generateUV creates realistic UV index
+// generateUV creates realistic UV index.
+//
+// It returns 0 outside 08:00-18:59, otherwise a sine-shaped value scaled by a
+// seasonal maximum, adjusted for latitude and noise, and never negative.
 func (wg *WeatherGenerator) generateUV(t time.Time) float64 {
 	hour := t.Hour()
 
@@ -422,12 +483,19 @@ func (wg *WeatherGenerator) generateUV(t time.Time) float64 {
 	return math.Max(0, maxUV*uvFactor+(wg.rng.Float64()-0.5)*2)
 }
 
-// GetDailyRainTotal returns the daily rain total for generated weather
+// GetDailyRainTotal returns the daily rain total for generated weather, in
+// mm since the last midnight reset.
 func (wg *WeatherGenerator) GetDailyRainTotal() float64 {
 	return wg.dailyRainTotal
 }
 
-// generateRain creates realistic precipitation and updates cumulative total
+// generateRain creates realistic precipitation and updates cumulative total.
+//
+// In real-time mode without a rain test pattern it first resets the daily
+// total when the day of year has changed. It then rolls against a
+// season- and climate-adjusted probability and, on a hit, adds 0-2.54 mm to
+// both the cumulative and the daily totals. It returns the incremental rain
+// in mm, or 0 when no rain fell.
 func (wg *WeatherGenerator) generateRain() float64 {
 	// Only update daily totals if not generating historical data and not using test patterns
 	if !wg.isGeneratingHistorical && wg.testPatternRain == nil {
@@ -477,7 +545,10 @@ func (wg *WeatherGenerator) generateRain() float64 {
 	return incrementalRain
 }
 
-// generateSolar creates realistic solar radiation
+// generateSolar creates realistic solar radiation.
+//
+// It returns W/m²: 0 outside 06:00-19:59, otherwise a sine-shaped value
+// scaled by a seasonal maximum and a random cloud factor.
 func (wg *WeatherGenerator) generateSolar(t time.Time) float64 {
 	hour := t.Hour()
 
@@ -506,7 +577,12 @@ func (wg *WeatherGenerator) generateSolar(t time.Time) float64 {
 	return maxSolar * solarFactor * (0.5 + wg.rng.Float64()*0.5)
 }
 
-// generatePrecipitationType determines precipitation type
+// generatePrecipitationType determines precipitation type.
+//
+// It returns 0 when rain is zero; otherwise 3 below 0 °C, 2 below 2 °C and 1
+// above. The code comments label 2 and 3 as ice pellets and snow, which
+// differs from the Tempest API meaning of those codes (see
+// types.Observation.PrecipitationType).
 func (wg *WeatherGenerator) generatePrecipitationType(temp, rain float64) int {
 	if rain == 0 {
 		return 0 // None
@@ -521,7 +597,8 @@ func (wg *WeatherGenerator) generatePrecipitationType(temp, rain float64) int {
 	}
 }
 
-// generateLightning creates lightning distance
+// generateLightning creates lightning distance: 5-45 km with a 5% chance,
+// otherwise 0. It is drawn independently of generateLightningCount.
 func (wg *WeatherGenerator) generateLightning() float64 {
 	// Lightning is rare
 	if wg.rng.Float64() < 0.05 { // 5% chance
@@ -530,7 +607,8 @@ func (wg *WeatherGenerator) generateLightning() float64 {
 	return 0
 }
 
-// generateLightningCount creates lightning count
+// generateLightningCount creates lightning count: 0-4 strikes with a 5%
+// chance, otherwise 0.
 func (wg *WeatherGenerator) generateLightningCount() int {
 	if wg.rng.Float64() < 0.05 { // 5% chance
 		return int(wg.rng.Float64() * 5) // 0-4 strikes
@@ -538,7 +616,18 @@ func (wg *WeatherGenerator) generateLightningCount() int {
 	return 0
 }
 
-// GenerateHistoricalData creates a series of historical observations
+// GenerateHistoricalData creates a series of historical observations.
+//
+// It returns count observations evenly spaced over the 24 hours before
+// CurrentTime (or before now when CurrentTime is zero), oldest first. Test
+// pattern start times are moved to the start of that window. RainDailyTotal
+// is computed only for observations at or after local midnight of the
+// reference day and is 0 for earlier ones. Base values drift slightly
+// between observations and that drift persists afterwards. The daily rain
+// total and CurrentTime are restored when it returns; cumulative rain is
+// restored too unless a rain test pattern is active. The series is also
+// kept as the generator's history. count must be positive: zero divides
+// by zero when computing the interval.
 func (wg *WeatherGenerator) GenerateHistoricalData(count int) []*types.Observation {
 	observations := make([]*types.Observation, count)
 
@@ -657,17 +746,20 @@ func (wg *WeatherGenerator) GenerateHistoricalData(count int) []*types.Observati
 	return observations
 }
 
-// GetLocation returns the current location
+// GetLocation returns the current location.
 func (wg *WeatherGenerator) GetLocation() Location {
 	return wg.Location
 }
 
-// GetSeason returns the current season
+// GetSeason returns the current season.
 func (wg *WeatherGenerator) GetSeason() Season {
 	return wg.Season
 }
 
-// Regenerate creates a new random location and season combination
+// Regenerate creates a new random location and season combination.
+//
+// It re-derives base values (resetting cumulative and daily rain) and clears
+// the stored history. Enabled test patterns are kept.
 func (wg *WeatherGenerator) Regenerate() {
 	// Select new random location and season
 	wg.Location = Locations[wg.rng.Intn(len(Locations))]
@@ -680,12 +772,18 @@ func (wg *WeatherGenerator) Regenerate() {
 	wg.history = nil
 }
 
-// GenerateNewSeason generates a new random location and season (alias for Regenerate)
+// GenerateNewSeason generates a new random location and season (alias for Regenerate).
 func (wg *WeatherGenerator) GenerateNewSeason() {
 	wg.Regenerate()
 }
 
-// EnableTestPattern enables a test pattern for a specific sensor
+// EnableTestPattern enables a test pattern for a specific sensor.
+//
+// sensor is one of "rain", "wind", "temp", "humidity", "pressure", "lux",
+// "uv" or "lightning"; other values are silently ignored. The pattern's
+// cycle starts now. The rain pattern starts its cumulative total from the
+// generator's current cumulative rain so the value keeps increasing.
+// Calling it again for the same sensor restarts that pattern.
 func (wg *WeatherGenerator) EnableTestPattern(sensor string) {
 	pattern := &TestPattern{
 		cycleCount: 0,
@@ -714,8 +812,11 @@ func (wg *WeatherGenerator) EnableTestPattern(sensor string) {
 	}
 }
 
-// ResetTestPatternRain resets the rain test pattern accumulation to current cumulative rain
-// This is needed after historical data generation which resets cumulativeRain
+// ResetTestPatternRain resets the rain test pattern accumulation to current cumulative rain.
+//
+// This is needed after historical data generation which resets cumulativeRain.
+// It also restarts the pattern's rate clock at now. It does nothing when no
+// rain pattern is enabled.
 func (wg *WeatherGenerator) ResetTestPatternRain() {
 	if wg.testPatternRain != nil {
 		wg.testPatternRain.lastRainAccum = wg.cumulativeRain
@@ -723,17 +824,22 @@ func (wg *WeatherGenerator) ResetTestPatternRain() {
 	}
 }
 
-// TestPattern represents a cycling test pattern for sensor simulation
+// TestPattern represents a cycling test pattern for sensor simulation.
+//
+// Every pattern steps through four fixed phases of 30 seconds each; see
+// GetCyclePhase and the ApplyTest*Pattern functions for the values.
 type TestPattern struct {
-	cycleCount     int
-	startTime      time.Time
+	cycleCount     int       // Initialised to zero; currently unused
+	startTime      time.Time // Reference time from which phases are counted
 	lastRainAccum  float64   // Track cumulative rain for rain pattern
 	lastUpdateTime time.Time // Track last update for rain rate calculation
 }
 
-// GetCyclePhase returns the current phase (0-3) based on elapsed time
-// Each complete cycle is 120 seconds (2 minutes), divided into 4 phases of 30 seconds each
-// When obsTime is provided (for historical generation), uses that instead of real time
+// GetCyclePhase returns the current phase (0-3) based on elapsed time.
+//
+// Each complete cycle is 120 seconds (2 minutes), divided into 4 phases of 30 seconds each.
+// When obsTime is provided (for historical generation), uses that instead of real time.
+// Elapsed time is measured from the pattern's start time.
 func (p *TestPattern) GetCyclePhase(obsTime *time.Time) int {
 	var elapsed float64
 	if obsTime != nil {
@@ -744,11 +850,16 @@ func (p *TestPattern) GetCyclePhase(obsTime *time.Time) int {
 	return (int(elapsed) / 30) % 4
 }
 
-// ApplyTestRainPattern applies a cycling rain pattern: 0 -> 0.5 -> 2.0 -> 10.0 mm/hr
-// RainAccumulated should be cumulative (always increasing) like real Tempest API
-// When obsTime is provided (for historical generation), uses that instead of real time
-// For historical generation with large intervals, uses constant 2 mm/hr to avoid phase integration issues
-// Returns the incremental rain amount so the generator can update dailyRainTotal
+// ApplyTestRainPattern applies a cycling rain pattern: 2.0 -> 0.5 -> 2.0 -> 10.0 mm/hr.
+//
+// RainAccumulated should be cumulative (always increasing) like real Tempest API.
+// When obsTime is provided (for historical generation), uses that instead of real time,
+// both for the phase and for the elapsed time since the previous call.
+// Historical generation uses the same cycling phases, keyed to each observation's
+// timestamp. The first call assumes 60 seconds have elapsed. The phase rate times
+// the elapsed time is added to pattern's running total, which is written to
+// obs.RainAccumulated; obs.PrecipitationType is set to 1 (rain).
+// Returns the incremental rain amount in mm so the generator can update dailyRainTotal.
 func ApplyTestRainPattern(obs *types.Observation, pattern *TestPattern, obsTime *time.Time) float64 {
 	var rainRate float64
 
@@ -802,7 +913,11 @@ func ApplyTestRainPattern(obs *types.Observation, pattern *TestPattern, obsTime 
 	return incrementalRain
 }
 
-// ApplyTestWindPattern applies a cycling wind pattern: 1 -> 4 -> 12 -> 22 m/s
+// ApplyTestWindPattern applies a cycling wind pattern: 1 -> 4 -> 12 -> 22 m/s.
+//
+// It sets obs.WindAvg, sets obs.WindGust to 1.5x the average and rotates
+// obs.WindDirection through 0, 90, 180 and 270 degrees. The phase always
+// uses the wall clock. WindLull is left unchanged.
 func ApplyTestWindPattern(obs *types.Observation, pattern *TestPattern) {
 	phase := pattern.GetCyclePhase(nil)
 	switch phase {
@@ -822,7 +937,9 @@ func ApplyTestWindPattern(obs *types.Observation, pattern *TestPattern) {
 	obs.WindDirection = float64((phase * 90) % 360)
 }
 
-// ApplyTestTempPattern applies a cycling temperature pattern: 0 -> 15 -> 25 -> 38 °C
+// ApplyTestTempPattern applies a cycling temperature pattern: 0 -> 15 -> 25 -> 38 °C.
+//
+// It sets obs.AirTemperature for the current phase, which always uses the wall clock.
 func ApplyTestTempPattern(obs *types.Observation, pattern *TestPattern) {
 	phase := pattern.GetCyclePhase(nil)
 	switch phase {
@@ -837,7 +954,9 @@ func ApplyTestTempPattern(obs *types.Observation, pattern *TestPattern) {
 	}
 }
 
-// ApplyTestHumidityPattern applies a cycling humidity pattern: 30 -> 50 -> 70 -> 95 %
+// ApplyTestHumidityPattern applies a cycling humidity pattern: 30 -> 50 -> 70 -> 95 %.
+//
+// It sets obs.RelativeHumidity for the current phase, which always uses the wall clock.
 func ApplyTestHumidityPattern(obs *types.Observation, pattern *TestPattern) {
 	phase := pattern.GetCyclePhase(nil)
 	switch phase {
@@ -852,7 +971,9 @@ func ApplyTestHumidityPattern(obs *types.Observation, pattern *TestPattern) {
 	}
 }
 
-// ApplyTestPressurePattern applies a cycling pressure pattern: 980 -> 1000 -> 1020 -> 1040 mb
+// ApplyTestPressurePattern applies a cycling pressure pattern: 980 -> 1000 -> 1020 -> 1040 mb.
+//
+// It sets obs.StationPressure for the current phase, which always uses the wall clock.
 func ApplyTestPressurePattern(obs *types.Observation, pattern *TestPattern) {
 	phase := pattern.GetCyclePhase(nil)
 	switch phase {
@@ -867,7 +988,10 @@ func ApplyTestPressurePattern(obs *types.Observation, pattern *TestPattern) {
 	}
 }
 
-// ApplyTestLuxPattern applies a cycling lux pattern: 0 -> 100 -> 10000 -> 50000 lux
+// ApplyTestLuxPattern applies a cycling lux pattern: 0 -> 100 -> 10000 -> 50000 lux.
+//
+// obs.SolarRadiation is set alongside to 0, 10, 500 and 1000 W/m². The phase
+// always uses the wall clock.
 func ApplyTestLuxPattern(obs *types.Observation, pattern *TestPattern) {
 	phase := pattern.GetCyclePhase(nil)
 	switch phase {
@@ -886,7 +1010,9 @@ func ApplyTestLuxPattern(obs *types.Observation, pattern *TestPattern) {
 	}
 }
 
-// ApplyTestUVPattern applies a cycling UV pattern: 0 -> 2 -> 7 -> 11 index
+// ApplyTestUVPattern applies a cycling UV pattern: 0 -> 2 -> 7 -> 11 index.
+//
+// It sets obs.UV for the current phase, which always uses the wall clock.
 func ApplyTestUVPattern(obs *types.Observation, pattern *TestPattern) {
 	phase := pattern.GetCyclePhase(nil)
 	switch phase {
@@ -901,7 +1027,10 @@ func ApplyTestUVPattern(obs *types.Observation, pattern *TestPattern) {
 	}
 }
 
-// ApplyTestLightningPattern applies a cycling lightning pattern: none -> 1@20km -> 5@5km -> 10@1km
+// ApplyTestLightningPattern applies a cycling lightning pattern: none -> 1@20km -> 5@5km -> 10@1km.
+//
+// It sets obs.LightningStrikeCount and obs.LightningStrikeAvg; the phase
+// always uses the wall clock.
 func ApplyTestLightningPattern(obs *types.Observation, pattern *TestPattern) {
 	phase := pattern.GetCyclePhase(nil)
 	switch phase {

@@ -1,6 +1,6 @@
 # Tempest HomeKit Go
 
-[![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat&logo=go)](https://golang.org) [![Test Coverage](https://img.shields.io/badge/coverage-60.3%25-yellow?style=flat)](./coverage.out) [![Build](https://github.com/BEHRConsulting/tempest-homekit-go/actions/workflows/ci.yml/badge.svg)](https://github.com/BEHRConsulting/tempest-homekit-go/actions) [![Release v1.11.0](https://img.shields.io/github/v/tag/BEHRConsulting/tempest-homekit-go?label=release&style=flat)](https://github.com/BEHRConsulting/tempest-homekit-go/releases/tag/v1.11.0) [![License](https://img.shields.io/badge/license-MIT-blue.svg?style=flat)](LICENSE)
+[![Go Version](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat&logo=go)](https://golang.org) [![Test Coverage](https://img.shields.io/badge/coverage-44.2%25-yellow?style=flat)](./coverage.out) [![Build](https://github.com/BEHRConsulting/tempest-homekit-go/actions/workflows/ci.yml/badge.svg)](https://github.com/BEHRConsulting/tempest-homekit-go/actions) [![Release v1.11.0](https://img.shields.io/github/v/tag/BEHRConsulting/tempest-homekit-go?label=release&style=flat)](https://github.com/BEHRConsulting/tempest-homekit-go/releases/tag/v1.11.0) [![License](https://img.shields.io/badge/license-MIT-blue.svg?style=flat)](LICENSE)
 
 Tempest HomeKit Go is a Go service that reads WeatherFlow Tempest station data and exposes sensors to Apple HomeKit while providing a modern web dashboard. It supports UDP stream mode, historical preloading, alarm notifications, and optional device status scraping.
 
@@ -640,7 +640,7 @@ The alarm status refreshes automatically every 10 seconds, providing real-time v
 Note: When using the WeatherFlow API token (`--token` or the `TEMPEST_TOKEN` env var), you must also specify the station name with `--station "Your Station Name"` or set `TEMPEST_STATION_NAME`. Examples in this README have been updated to include `--station` where `--token` is used.
 
 ### Prerequisites
-- Go 1.24.2 or later
+- Go 1.24 or later (go.mod: `go 1.24.0`)
 - WeatherFlow Tempest station with API access
 - Apple device with HomeKit support
 - Google Chrome (optional, for detailed device status via `--use-web-status`)
@@ -668,10 +668,11 @@ STATION_URL=http://localhost:8080/api/generate-weather ./tempest-homekit-go
 ./tempest-homekit-go --use-generated-weather --history-read # preloads up to HISTORY_POINTS observations
 ```
 
-### Cross-Platform Build (All Platforms)
+### Build Script (Current Platform)
 ```bash
 ./scripts/build.sh
 ```
+For binaries for every platform use `./scripts/build-cross-platform.sh` (see [Installation](#installation)).
 
 ### Install as System Service
 ```bash
@@ -700,7 +701,7 @@ This builds only for your current platform (macOS binaries on macOS, Linux on Li
 ```
 This builds optimized binaries for Linux, macOS, and Windows from any platform.
 
-### Option 3: Install as Service
+### Option 4: Install as Service
 For production deployment, install as a system service:
 ```bash
 # Linux (systemd)
@@ -1281,7 +1282,7 @@ Warning: **HomeKit Compliance Warning**: As of Home.app v10.0, all sensors label
 Access the modern web dashboard at `http://localhost:8080` (or your configured port).
 
 ### Dashboard Features
-- **External JavaScript Architecture**: Clean separation with all ~800+ lines of JavaScript moved to external `script.js` file
+- **External JavaScript Architecture**: Clean separation with all dashboard JavaScript (about 6,000 lines) kept in the external `script.js` file
 - **Real-time Updates**: Weather data refreshes every 10 seconds with comprehensive error handling
 - **Pressure Analysis System**: Advanced atmospheric pressure monitoring with:
  - **Trend Analysis**: Rising, Falling, or Stable pressure trends
@@ -1322,34 +1323,31 @@ Access the modern web dashboard at `http://localhost:8080` (or your configured p
 
 ```
 tempest-homekit-go/
-├── main.go # Application entry point
-├── go.mod # Go module definition
-├── go.sum # Dependency checksums
-├── scripts/
-│ ├── build.sh # Platform-specific build script
-│ ├── build-cross-platform.sh # Cross-platform build script
-│ ├── install-service.sh # Service installation script
-│ ├── remove-service.sh # Service removal script
-│ └── README.md # Scripts documentation
-├── pkg/
-│ ├── config/ # Configuration management
-│ │ └── config.go
-│ ├── weather/ # WeatherFlow API client
-│ │ ├── client.go # API client and TempestWX scraping
-│ │ └── status_manager.go # Periodic status scraping manager
-│ ├── homekit/ # HomeKit accessory setup
-│ │ ├── modern_setup.go # Modern HAP library implementation
-│ │ └── custom_characteristics.go # Custom weather characteristics
-│ ├── web/ # Web dashboard server
-│ │ ├── server.go # HTTP server with static file serving
-│ │ └── static/ # Static web assets
-│ │ ├── script.js # External JavaScript (~800+ lines)
-│ │ ├── styles.css # CSS styling
-│ │ └── date-fns.min.js # Date manipulation library
-│ └── service/ # Main service orchestration
-│ └── service.go
-└── README.md
+├── main.go                 # Entry point: env/flags, one-shot test modes, service start
+├── go.mod / go.sum         # Module definition and checksums
+├── Makefile                # vendor-static: refresh vendored Chart.js / adapter / QR code JS
+├── scripts/                # build, cross-build, service install/remove, AWS SNS setup, GoDoc server
+├── tests/                  # manual integration shell scripts (drive a built binary)
+├── examples/               # example alarm configurations
+├── docs/                   # feature and development documentation
+└── pkg/
+    ├── alarm/              # alarm types, evaluator, scheduling, manager, notifiers
+    │   └── editor/         # standalone web alarm editor (server + static assets)
+    ├── config/             # flags, environment variables, validation
+    ├── generator/          # synthetic weather generator
+    ├── homekit/            # HAP bridge, accessories, custom characteristics
+    ├── logger/             # level-filtered logging
+    ├── service/            # orchestration and data-source factory
+    ├── status/             # terminal status console (tview) and themes
+    ├── testhelpers/        # headless-browser test helpers
+    ├── types/              # shared types
+    ├── udp/                # Tempest hub UDP broadcast listener
+    ├── weather/            # WeatherFlow API client, DataSource implementations, status scraping
+    └── web/                # dashboard HTTP server and JSON API
+        └── static/         # dashboard JS/CSS/HTML (script.js) and vendored Chart.js / QR code libraries
 ```
+
+See [AGENTS.md](AGENTS.md) for a per-directory description and the verified build/test commands.
 
 ## API Integration
 
@@ -1735,8 +1733,15 @@ Then visit `http://localhost:6060` to browse:
 
 ### Running Tests
 ```bash
-# Run all tests
+# Run all tests (includes headless-Chrome UI tests in pkg/web and pkg/testhelpers, ~30 s)
 go test ./...
+
+# Run all tests without the browser-dependent ones (what CI's main job runs)
+go test -tags=no_browser ./...
+
+# Static checks (no repo-level golangci config; CI runs golangci-lint with --issues-exit-code=0)
+go vet ./...
+golangci-lint run ./...
 
 # Run tests with coverage
 go test -cover ./...
@@ -1751,37 +1756,43 @@ go test ./pkg/web/...
 go test ./pkg/service/...
 ```
 
+JavaScript unit tests (dashboard helpers) run under Jest with jsdom, using `jest.web.config.json`
+and the tests in `pkg/web/static/__tests__/`. `package.json` is listed in `.gitignore` and is not
+tracked, so a fresh clone needs a local `package.json` with `jest`, `jest-environment-jsdom` and
+`jsdom` before this works:
+
+```bash
+npx jest --runInBand --config jest.web.config.json
+```
+
+Git hooks are in `.githooks/` (`git config core.hooksPath .githooks`). The pre-commit hook runs
+`gofmt -s -w` on staged Go files and `npm test` when JavaScript files are staged.
+
 # Test Coverage Overview
-- coverage report saved at `./coverage.out` (generated by the most recent coverage run)
-- Current per-package snapshot from the latest test runs:
- - pkg/config: 79.9%
- - pkg/generator: ~86%
- - pkg/homekit: 84.5%
- - pkg/logger: 91.3%
- - pkg/service: 49.1% (highest-leverage area to add tests)
- - pkg/udp: 51.3%
- - pkg/weather: 60.8%
- - pkg/web: 65.0%
+- Measured 2026-10-16 with `go test -coverprofile=coverage.out ./...` (browser tests included); see the table below.
 
-**Current Aggregate Coverage**: 60.3% (see `./coverage.out`)
+**Current Aggregate Coverage**: 44.2%
 
-Note: Per-package numbers above were collected from individual `go test` outputs during iterative runs. The aggregate coverage uses a single `coverage.out` collected with `go test -coverprofile=coverage.out ./...` and is the authoritative project-wide percentage. The current project goal is to raise overall coverage to >= 70% by adding targeted tests (priority: `pkg/service`, then `pkg/weather`).
+Note: The aggregate coverage uses a single `coverage.out` collected with `go test -coverprofile=coverage.out ./...` and is the authoritative project-wide percentage. The current project goal is to raise overall coverage to >= 70% by adding targeted tests (priority: `pkg/service`, then `pkg/weather`).
 
 ### Package Coverage Breakdown
 
-| Package | Coverage |
+| Package | Coverage (2026-10-16) |
 |---------|----------|
-| pkg/alarm | 61.9% |
-| pkg/alarm/editor | 28.8% |
-| pkg/config | 80.2% |
-| pkg/generator | 87.8% |
-| pkg/homekit | 84.5% |
-| pkg/logger | 91.3% |
-| pkg/service | 47.7% |
-| pkg/udp | 51.3% |
-| pkg/weather | 60.8% |
-| pkg/web | 65.0% |
-| **Overall** | **60.3%** |
+| main | 0.0% |
+| pkg/alarm | 56.7% |
+| pkg/alarm/editor | 35.1% |
+| pkg/config | 86.2% |
+| pkg/generator | 56.3% |
+| pkg/homekit | 76.3% |
+| pkg/logger | 82.4% |
+| pkg/service | 39.5% |
+| pkg/status | 14.6% |
+| pkg/testhelpers | 43.0% |
+| pkg/udp | 63.5% |
+| pkg/weather | 38.3% |
+| pkg/web | 54.4% |
+| **Overall** | **44.2%** |
 
 ### Testing Architecture
 The project includes unit tests and integration-style tests that use small, isolated test doubles and local httptest servers where appropriate. Test patterns used across the repo:

@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// Test parseStationStatusHTML with a representative HTML fragment
+// TestParseStationStatusHTML_Basic tests parseStationStatusHTML with a representative HTML fragment.
 func TestParseStationStatusHTML_Basic(t *testing.T) {
 	html := `
     <div id="diagnostic-info">
@@ -69,7 +69,7 @@ func TestParseStationStatusHTML_Basic(t *testing.T) {
 	}
 }
 
-// Test filterToOneMinuteIncrements to ensure it filters and orders correctly
+// TestFilterToOneMinuteIncrements tests filterToOneMinuteIncrements to ensure it filters and orders correctly.
 func TestFilterToOneMinuteIncrements(t *testing.T) {
 	now := time.Now().Unix()
 	// Create observations every 30 seconds for 5 minutes

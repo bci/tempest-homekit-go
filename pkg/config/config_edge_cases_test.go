@@ -352,7 +352,8 @@ func TestParseElevationEdgeCases(t *testing.T) {
 	}
 }
 
-// Helper function for floating point comparison
+// absFloat is a helper function for floating point comparison; it returns
+// the absolute value of x.
 func absFloat(x float64) float64 {
 	if x < 0 {
 		return -x

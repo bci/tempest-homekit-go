@@ -1,4 +1,6 @@
-// Package status provides themed color schemes for the terminal UI
+// This file provides themed color schemes for the terminal UI (see the package
+// documentation in console.go).
+
 package status
 
 import (
@@ -7,7 +9,30 @@ import (
 	"github.com/gdamore/tcell/v2"
 )
 
-// Theme defines color scheme for the status console
+// Theme defines color scheme for the status console: one tcell color per UI
+// role, plus the name and description shown by ListThemes.
+//
+// Fields:
+//
+//   - Name is the theme identifier accepted by --status-theme, for example
+//     "dark-ocean".
+//   - Description is the one-line summary printed by ListThemes.
+//   - Background is the terminal background the theme is designed for.
+//   - TitleColor colors the title bar text.
+//   - BorderColor colors the panel borders.
+//   - LabelColor colors field labels inside panels.
+//   - ValueColor colors field values and uncategorised log lines.
+//   - FooterColor colors the footer text.
+//   - TimerColor highlights the running time, countdown and theme name in the
+//     footer.
+//   - ErrorColor colors ERROR log lines.
+//   - WarningColor colors WARN log lines and the alarm "Cooling Down" heading.
+//   - InfoColor colors INFO log lines.
+//   - DebugColor colors DEBUG log lines.
+//   - SuccessColor marks healthy states, such as an active HomeKit bridge.
+//   - DangerColor marks failures, disabled states, triggered alarms and ALARM log
+//     lines.
+//   - MutedColor de-emphasises placeholder text such as "No sensors published".
 type Theme struct {
 	Name        string
 	Description string
@@ -33,7 +58,9 @@ type Theme struct {
 	MutedColor   tcell.Color
 }
 
-// Predefined color themes
+// themes holds the predefined color themes keyed by name: six for dark
+// terminal backgrounds and six for light ones. GetAllThemeNames defines their
+// display and cycling order.
 var themes = map[string]*Theme{
 	// Dark background themes
 	"dark-ocean": {
@@ -256,7 +283,8 @@ var themes = map[string]*Theme{
 	},
 }
 
-// GetTheme returns the theme by name, or default if not found
+// GetTheme returns the theme by name, or default if not found; the default is
+// "dark-ocean". The returned *Theme is shared and must not be modified.
 func GetTheme(name string) *Theme {
 	if theme, ok := themes[name]; ok {
 		return theme
@@ -264,7 +292,8 @@ func GetTheme(name string) *Theme {
 	return themes["dark-ocean"] // Default theme
 }
 
-// GetAllThemeNames returns a list of all theme names in order
+// GetAllThemeNames returns a list of all theme names in order: the dark themes
+// first, then the light ones. This order is the one GetNextTheme cycles through.
 func GetAllThemeNames() []string {
 	return []string{
 		"dark-ocean", "dark-forest", "dark-sunset", "dark-twilight", "dark-matrix", "dark-cyberpunk",
@@ -272,7 +301,9 @@ func GetAllThemeNames() []string {
 	}
 }
 
-// GetNextTheme returns the next theme in the cycle
+// GetNextTheme returns the next theme in the cycle after currentName, wrapping from
+// the last to the first. For an unknown name it falls back to GetTheme, which
+// yields the default theme.
 func GetNextTheme(currentName string) *Theme {
 	names := GetAllThemeNames()
 	for i, name := range names {
@@ -284,7 +315,8 @@ func GetNextTheme(currentName string) *Theme {
 	return GetTheme(currentName) // Fallback to current
 }
 
-// ListThemes prints all available themes grouped by background type
+// ListThemes prints all available themes grouped by background type to stdout,
+// followed by usage examples for --status-theme and STATUS_THEME.
 func ListThemes() {
 	fmt.Println("Available Status Console Themes")
 	fmt.Println("================================")
@@ -312,7 +344,9 @@ func ListThemes() {
 	fmt.Println("  STATUS_THEME=dark-cyberpunk tempest-homekit-go --status")
 }
 
-// GetLogLevelColor returns the appropriate color for a log level based on theme
+// GetLogLevelColor returns the appropriate color for a log level based on theme.
+// level is matched case-sensitively against the upper- and lower-case spellings
+// of ERROR, WARNING/WARN, INFO and DEBUG; anything else gets ValueColor.
 func (t *Theme) GetLogLevelColor(level string) tcell.Color {
 	switch level {
 	case "ERROR", "error":
@@ -328,7 +362,11 @@ func (t *Theme) GetLogLevelColor(level string) tcell.Color {
 	}
 }
 
-// ColorizeLogLine applies theme colors to log messages based on level
+// ColorizeLogLine applies theme colors to log messages based on level, wrapping
+// line in a tview color tag. A line containing "LEVEL:" or "[LEVEL]" for ERROR,
+// WARN, INFO or DEBUG (checked in that order) gets that level's color; otherwise
+// a line containing "ALARM" or the siren emoji gets DangerColor. Other lines
+// are returned unchanged.
 func (t *Theme) ColorizeLogLine(line string) string {
 	// Simple pattern matching for common log formats
 	if len(line) == 0 {
@@ -351,7 +389,9 @@ func (t *Theme) ColorizeLogLine(line string) string {
 	return line
 }
 
-// colorToTviewTag converts tcell.Color to tview color tag
+// colorToTviewTag converts tcell.Color to tview color tag text (the part inside
+// "[...]"). Common colors map to their tview names; any other color is rendered
+// as a "#rrggbb" hex code.
 func colorToTviewTag(c tcell.Color) string {
 	// Map common tcell colors to tview color names
 	colorMap := map[tcell.Color]string{
@@ -392,12 +432,15 @@ func colorToTviewTag(c tcell.Color) string {
 	return fmt.Sprintf("#%06x", c.Hex())
 }
 
-// contains checks if a string contains a substring (case-insensitive helper for internal use)
+// contains reports whether substr occurs in s. Despite older notes calling it a
+// case-insensitive helper, the comparison is case-sensitive and equivalent to
+// strings.Contains.
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr ||
 		len(s) > len(substr) && findSubstring(s, substr))
 }
 
+// findSubstring reports whether substr occurs in s by a naive byte-wise scan.
 func findSubstring(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {

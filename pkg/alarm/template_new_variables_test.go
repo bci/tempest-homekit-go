@@ -8,6 +8,9 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
+// TestNewTemplateVariables checks the plain-text expansion of the composite variables
+// {{app_info}}, {{alarm_info}}, {{sensor_info}} and {{alarm_condition}}, alone and
+// combined. The expected "v1.7.0" must match appVersion.
 func TestNewTemplateVariables(t *testing.T) {
 	alarm := &Alarm{
 		Name:        "Test Alarm",
@@ -78,6 +81,8 @@ func TestNewTemplateVariables(t *testing.T) {
 	}
 }
 
+// TestNewTemplateVariablesHTML checks that the composite variables expand to HTML
+// (tables and styled divs) when the template is an HTML document.
 func TestNewTemplateVariablesHTML(t *testing.T) {
 	alarm := &Alarm{
 		Name:        "HTML Test",
@@ -142,6 +147,9 @@ func TestNewTemplateVariablesHTML(t *testing.T) {
 	}
 }
 
+// TestFormatSensorInfoPlainText checks the plain-text sensor block: dual temperature
+// units, pressure in mb, compass wind direction, thousands separators, rain rate and
+// daily rain in inches and mm, and the lightning count.
 func TestFormatSensorInfoPlainText(t *testing.T) {
 	obs := &weather.Observation{
 		AirTemperature:       25.5,
@@ -181,6 +189,8 @@ func TestFormatSensorInfoPlainText(t *testing.T) {
 	}
 }
 
+// TestFormatSensorInfoHTML checks that formatSensorInfo in HTML mode produces a table
+// with the formatted temperature, humidity and pressure values.
 func TestFormatSensorInfoHTML(t *testing.T) {
 	obs := &weather.Observation{
 		AirTemperature:   30.0,
@@ -210,6 +220,8 @@ func TestFormatSensorInfoHTML(t *testing.T) {
 	}
 }
 
+// TestFormatAlarmInfo checks formatAlarmInfo in plain text (name, condition, cooldown in
+// hours, comma-joined tags) and that the HTML form is a table with the name.
 func TestFormatAlarmInfo(t *testing.T) {
 	alarm := &Alarm{
 		Name:        "High Temperature",
@@ -245,6 +257,8 @@ func TestFormatAlarmInfo(t *testing.T) {
 	}
 }
 
+// TestFormatAppInfo checks that formatAppInfo includes the app name, version and uptime
+// in plain text and a styled div in HTML. The expected "v1.7.0" must match appVersion.
 func TestFormatAppInfo(t *testing.T) {
 	// Test plain text
 	result := formatAppInfo(false)
@@ -271,6 +285,8 @@ func TestFormatAppInfo(t *testing.T) {
 	}
 }
 
+// TestFormatNumber checks that formatNumber rounds to an integer and inserts thousands
+// separators.
 func TestFormatNumber(t *testing.T) {
 	tests := []struct {
 		input    float64

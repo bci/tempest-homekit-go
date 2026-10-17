@@ -8,6 +8,8 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
+// TestManager_ProcessObservation_Nil checks that ProcessObservation(nil) on a
+// file-backed Manager returns without panicking.
 func TestManager_ProcessObservation_Nil(t *testing.T) {
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "alarms.json")
@@ -38,6 +40,8 @@ func TestManager_ProcessObservation_Nil(t *testing.T) {
 	manager.ProcessObservation(nil)
 }
 
+// TestManager_ProcessObservation_DisabledAlarm checks that a disabled alarm whose
+// condition matches never records a fire time.
 func TestManager_ProcessObservation_DisabledAlarm(t *testing.T) {
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "alarms.json")
@@ -79,6 +83,8 @@ func TestManager_ProcessObservation_DisabledAlarm(t *testing.T) {
 	}
 }
 
+// TestManager_ProcessObservation_InvalidCondition checks that an alarm whose condition
+// fails to evaluate is skipped rather than fired.
 func TestManager_ProcessObservation_InvalidCondition(t *testing.T) {
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "alarms.json")
@@ -120,6 +126,8 @@ func TestManager_ProcessObservation_InvalidCondition(t *testing.T) {
 	}
 }
 
+// TestManager_ProcessObservation_TriggeredAlarm checks that an enabled alarm whose
+// condition matches records a fire time.
 func TestManager_ProcessObservation_TriggeredAlarm(t *testing.T) {
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "alarms.json")
@@ -161,6 +169,8 @@ func TestManager_ProcessObservation_TriggeredAlarm(t *testing.T) {
 	}
 }
 
+// TestManager_ProcessObservation_MultipleAlarms checks that one observation fires each
+// matching alarm and leaves non-matching ones untouched.
 func TestManager_ProcessObservation_MultipleAlarms(t *testing.T) {
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "alarms.json")
@@ -229,6 +239,8 @@ func TestManager_ProcessObservation_MultipleAlarms(t *testing.T) {
 	}
 }
 
+// TestManager_GetConfigPath_WithAtSign checks that a Manager created from "@path"
+// reports the path without the "@" prefix.
 func TestManager_GetConfigPath_WithAtSign(t *testing.T) {
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "alarms.json")
@@ -262,6 +274,8 @@ func TestManager_GetConfigPath_WithAtSign(t *testing.T) {
 	}
 }
 
+// TestManager_GetConfigPath_Inline checks that a Manager created from inline JSON
+// reports "Inline configuration" as its config path.
 func TestManager_GetConfigPath_Inline(t *testing.T) {
 	config := `{
 		"alarms": [

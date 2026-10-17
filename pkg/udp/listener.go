@@ -1,5 +1,11 @@
 // Package udp provides UDP broadcast listener for local Tempest weather station data.
 // This enables offline weather monitoring when internet connectivity is unavailable.
+//
+// A Tempest hub broadcasts JSON datagrams on UDP port 50222 to the local network.
+// UDPListener receives them, converts observation messages (obs_st, obs_air,
+// obs_sky) into weather.Observation values kept in a bounded history, records the
+// latest device_status and hub_status messages, and only logs rapid_wind,
+// evt_precip and evt_strike events.
 package udp
 
 import (
@@ -14,13 +20,18 @@ import (
 )
 
 const (
-	// UDPPort is the port that Tempest hubs broadcast on
+	// UDPPort is the port that Tempest hubs broadcast on.
 	UDPPort = 50222
 )
 
-// MessageType represents the type of UDP broadcast message
+// MessageType represents the type of UDP broadcast message (the JSON "type" field).
 type MessageType string
 
+// Message types sent by a Tempest hub, as they appear in UDPMessage.Type:
+// observations from a Tempest (obs_st), the legacy AIR and SKY devices
+// (obs_air, obs_sky), the 3-second rapid wind update, rain-start and
+// lightning-strike events, and the periodic device_status and hub_status
+// health reports.
 const (
 	TypeObservationST  MessageType = "obs_st"     // Tempest observation
 	TypeObservationAir MessageType = "obs_air"    // AIR device observation
@@ -38,7 +49,9 @@ const (
 type FlexInt int
 
 // UnmarshalJSON implements json.Unmarshaler for FlexInt.
-// It handles both integer and string representations of numbers.
+// It handles both integer and string representations of numbers. A string that
+// does not start with an integer decodes as 0 rather than failing; any other
+// JSON type returns an error.
 func (fi *FlexInt) UnmarshalJSON(data []byte) error {
 	// Try to unmarshal as int first
 	var i int
@@ -64,7 +77,29 @@ func (fi *FlexInt) UnmarshalJSON(data []byte) error {
 	return fmt.Errorf("firmware_revision must be int or string")
 }
 
-// UDPMessage represents the generic structure of all UDP broadcast messages
+// UDPMessage represents the generic structure of all UDP broadcast messages. It
+// is the union of every message type's fields; which ones are populated depends
+// on Type.
+//
+// Fields:
+//
+//   - SerialNumber is the sending device's serial (ST-..., AR-..., SK-... or the
+//     hub's HB-...).
+//   - Type is the message type, one of the Type* constants.
+//   - HubSN is the serial of the hub that relayed the message.
+//   - FirmwareRevision is the device or hub firmware revision, sent as either a
+//     number or a string.
+//   - Obs holds observation rows for obs_st, obs_air and obs_sky; each row is a
+//     positional array of numbers (or null), see the process* methods for the
+//     layouts. Only the first row is used.
+//   - Ob is the single [timestamp, speed m/s, direction deg] row of a rapid_wind
+//     message.
+//   - Evt is the event payload of evt_precip ([timestamp]) and evt_strike
+//     ([timestamp, distance km, energy]).
+//   - Timestamp, Uptime (seconds), Voltage (battery volts), RSSI, HubRSSI,
+//     SensorStatus (bit flags) and Debug come from device_status; Timestamp,
+//     Uptime and RSSI are also sent in hub_status.
+//   - ResetFlags, Seq, RadioStats and MqttStats come from hub_status.
 type UDPMessage struct {
 	SerialNumber     string          `json:"serial_number"`
 	Type             MessageType     `json:"type"`
@@ -88,7 +123,28 @@ type UDPMessage struct {
 	MqttStats  []interface{} `json:"mqtt_stats,omitempty"`
 }
 
-// UDPListener listens for UDP broadcasts from a Tempest weather station
+// UDPListener listens for UDP broadcasts from a Tempest weather station. Create
+// it with NewUDPListener and call Start; all methods are safe for concurrent
+// use.
+//
+// Fields:
+//
+//   - conn is the bound UDP socket; nil until Start succeeds.
+//   - observations is the bounded observation history, oldest first.
+//   - maxHistorySize caps len(observations).
+//   - latestObs is the most recent observation, or nil before the first.
+//   - mu guards the mutable fields below it.
+//   - packetCount and lastPacketTime count every datagram received and when the
+//     last one arrived, whether or not it parsed.
+//   - stationIP is the source address of the first datagram received.
+//   - serialNumber is the first non-empty serial_number seen.
+//   - deviceStatus and hubStatus are the latest device_status and hub_status
+//     reports, or nil before one arrives.
+//   - observationChan receives each new observation; sends are non-blocking
+//     and dropped when its 100-slot buffer is full.
+//   - stopChan is closed by Stop to end the listen loop.
+//   - running reports whether Start has been called without a matching Stop.
+//   - packetCallback, if set, receives every raw datagram.
 type UDPListener struct {
 	conn            *net.UDPConn
 	observations    []weather.Observation
@@ -107,7 +163,18 @@ type UDPListener struct {
 	packetCallback  func([]byte) // Callback for raw packet data
 }
 
-// DeviceStatus holds device status information
+// DeviceStatus holds device status information from the most recent
+// device_status message.
+//
+// Fields:
+//
+//   - Timestamp is when the device sent the report.
+//   - Uptime is the device uptime in seconds.
+//   - Voltage is the battery voltage.
+//   - RSSI is the device's radio signal strength in dBm and HubRSSI the
+//     hub's, both as reported in the device_status message.
+//   - SensorStatus is the sensor-failure bit field reported by the device.
+//   - Debug is the device's debug flag.
 type DeviceStatus struct {
 	Timestamp    time.Time
 	Uptime       int
@@ -118,7 +185,18 @@ type DeviceStatus struct {
 	Debug        int
 }
 
-// HubStatus holds hub status information
+// HubStatus holds hub status information from the most recent hub_status
+// message.
+//
+// Fields:
+//
+//   - Timestamp is when the hub sent the report.
+//   - FirmwareRev is the firmware revision as decimal text.
+//   - Uptime is the hub uptime in seconds.
+//   - RSSI is the hub's Wi-Fi signal strength in dBm.
+//   - ResetFlags lists the causes of the hub's last reset.
+//   - Seq is the hub's status sequence number.
+//   - SerialNumber is the hub serial.
 type HubStatus struct {
 	Timestamp    time.Time
 	FirmwareRev  string
@@ -129,7 +207,10 @@ type HubStatus struct {
 	SerialNumber string
 }
 
-// NewUDPListener creates a new UDP listener
+// NewUDPListener creates a new UDP listener that keeps up to maxHistorySize
+// observations. Values below 10 are treated as invalid and replaced by 1000;
+// values above 100000 are capped at 100000 (with a warning) to bound memory use.
+// The listener is idle until Start is called.
 func NewUDPListener(maxHistorySize int) *UDPListener {
 	if maxHistorySize < 10 {
 		maxHistorySize = 1000 // default if invalid
@@ -150,14 +231,19 @@ func NewUDPListener(maxHistorySize int) *UDPListener {
 }
 
 // SetPacketCallback sets a callback function that will be called for each received packet
-// The callback receives the raw packet data
+// The callback receives the raw packet data. It runs synchronously on the
+// listener goroutine before the packet is parsed (used by --test-udp mode), and
+// the slice aliases the read buffer, so it must be copied if retained. Pass nil
+// to remove the callback.
 func (l *UDPListener) SetPacketCallback(callback func([]byte)) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.packetCallback = callback
 }
 
-// Start begins listening for UDP broadcasts
+// Start begins listening for UDP broadcasts on 0.0.0.0:UDPPort and processes them
+// in a background goroutine. It returns an error if the listener is already
+// running or the port cannot be bound (for example, another process holds it).
 func (l *UDPListener) Start() error {
 	l.mu.Lock()
 	if l.running {
@@ -189,7 +275,9 @@ func (l *UDPListener) Start() error {
 	return nil
 }
 
-// Stop stops the UDP listener
+// Stop stops the UDP listener by signalling the listen loop and closing the
+// socket. It is a no-op returning nil if the listener is not running; otherwise it
+// returns any error from closing the socket.
 func (l *UDPListener) Stop() error {
 	l.mu.Lock()
 	if !l.running {
@@ -206,7 +294,11 @@ func (l *UDPListener) Stop() error {
 	return nil
 }
 
-// listen is the main listening loop
+// listen is the main listening loop. It reads datagrams with a one-second read
+// deadline so it can notice stopChan being closed, updates the packet statistics
+// (recording the first sender's IP as the station IP) and hands each datagram to
+// processMessage. Read errors other than timeouts are logged and the loop
+// continues.
 func (l *UDPListener) listen() {
 	buffer := make([]byte, 4096)
 
@@ -245,7 +337,10 @@ func (l *UDPListener) listen() {
 	}
 }
 
-// PrettyPrintMessage formats a UDP message for human-readable output
+// PrettyPrintMessage formats a UDP message for human-readable output as a single
+// line prefixed with the current local time. Observation and event messages show
+// their key readings; messages too short to decode are reported as
+// "(incomplete data)" and unparseable JSON as "Failed to parse: ...".
 func PrettyPrintMessage(data []byte) string {
 	var msg UDPMessage
 	if err := json.Unmarshal(data, &msg); err != nil {
@@ -331,7 +426,10 @@ func PrettyPrintMessage(data []byte) string {
 	return fmt.Sprintf("[%s] %s (incomplete data) | Serial: %s", ts, msg.Type, msg.SerialNumber)
 }
 
-// processMessage parses and processes a UDP message
+// processMessage parses and processes a UDP message: it passes the raw bytes to
+// the packet callback, prints a pretty form when debug logging is enabled,
+// records the first serial number seen, and dispatches on the message type.
+// Unparseable messages are logged at debug level and dropped.
 func (l *UDPListener) processMessage(data []byte) {
 	// Call packet callback if set (for --test-udp mode)
 	l.mu.RLock()
@@ -391,7 +489,10 @@ func (l *UDPListener) processMessage(data []byte) {
 	}
 }
 
-// processObservationST processes a Tempest (ST) observation message
+// processObservationST processes a Tempest (ST) observation message, converting
+// the first 18-element observation row into a weather.Observation and adding it
+// to the history. Shorter rows are logged and ignored. Units are as broadcast
+// (metric: m/s, mb, deg C, mm).
 func (l *UDPListener) processObservationST(msg UDPMessage) {
 	if len(msg.Obs) == 0 || len(msg.Obs[0]) < 18 {
 		logger.Debug("Invalid Tempest observation data")
@@ -435,7 +536,8 @@ func (l *UDPListener) processObservationST(msg UDPMessage) {
 	l.addObservation(observation)
 }
 
-// processObservationAir processes an AIR device observation
+// processObservationAir processes an AIR device observation, adding it to the
+// history. Rows shorter than 8 elements are silently ignored.
 func (l *UDPListener) processObservationAir(msg UDPMessage) {
 	if len(msg.Obs) == 0 || len(msg.Obs[0]) < 8 {
 		return
@@ -463,7 +565,8 @@ func (l *UDPListener) processObservationAir(msg UDPMessage) {
 	l.addObservation(observation)
 }
 
-// processObservationSky processes a SKY device observation
+// processObservationSky processes a SKY device observation, adding it to the
+// history. Rows shorter than 14 elements are silently ignored.
 func (l *UDPListener) processObservationSky(msg UDPMessage) {
 	if len(msg.Obs) == 0 || len(msg.Obs[0]) < 14 {
 		return
@@ -496,7 +599,8 @@ func (l *UDPListener) processObservationSky(msg UDPMessage) {
 	l.addObservation(observation)
 }
 
-// processRapidWind processes rapid wind updates (every 3 seconds)
+// processRapidWind processes rapid wind updates (every 3 seconds). It only logs
+// them; wind in the history is updated when the next full observation arrives.
 func (l *UDPListener) processRapidWind(msg UDPMessage) {
 	if len(msg.Ob) < 3 {
 		return
@@ -512,7 +616,8 @@ func (l *UDPListener) processRapidWind(msg UDPMessage) {
 	// The full observation will be processed when obs_st arrives
 }
 
-// processDeviceStatus processes device status messages
+// processDeviceStatus processes device status messages, replacing the stored
+// DeviceStatus.
 func (l *UDPListener) processDeviceStatus(msg UDPMessage) {
 	status := &DeviceStatus{
 		Timestamp:    time.Unix(msg.Timestamp, 0),
@@ -532,7 +637,8 @@ func (l *UDPListener) processDeviceStatus(msg UDPMessage) {
 		msg.SerialNumber, msg.Timestamp, status.Voltage, status.Uptime, status.RSSI, status.HubRSSI, status.SensorStatus)
 }
 
-// processHubStatus processes hub status messages
+// processHubStatus processes hub status messages, replacing the stored
+// HubStatus.
 func (l *UDPListener) processHubStatus(msg UDPMessage) {
 	status := &HubStatus{
 		Timestamp:    time.Unix(msg.Timestamp, 0),
@@ -552,7 +658,10 @@ func (l *UDPListener) processHubStatus(msg UDPMessage) {
 		msg.SerialNumber, msg.Timestamp, status.FirmwareRev, status.Uptime, status.RSSI, status.ResetFlags, status.Seq)
 }
 
-// addObservation adds an observation to the history and notifies observers
+// addObservation adds an observation to the history and notifies observers. The
+// oldest entry is dropped once maxHistorySize is reached, obs becomes the latest
+// observation, and it is offered to observationChan without blocking (dropped
+// if the channel is full).
 func (l *UDPListener) addObservation(obs weather.Observation) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -575,7 +684,8 @@ func (l *UDPListener) addObservation(obs weather.Observation) {
 	}
 }
 
-// GetLatestObservation returns the most recent observation
+// GetLatestObservation returns the most recent observation as a copy, or nil if
+// none has been received.
 func (l *UDPListener) GetLatestObservation() *weather.Observation {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -586,7 +696,7 @@ func (l *UDPListener) GetLatestObservation() *weather.Observation {
 	return &obs
 }
 
-// GetObservations returns all stored observations
+// GetObservations returns all stored observations as a copy, oldest first.
 func (l *UDPListener) GetObservations() []weather.Observation {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -596,7 +706,9 @@ func (l *UDPListener) GetObservations() []weather.Observation {
 	return result
 }
 
-// GetStats returns UDP listener statistics
+// GetStats returns UDP listener statistics: the number of datagrams received,
+// when the last one arrived (zero if none), the station IP and the device serial
+// number (empty until detected).
 func (l *UDPListener) GetStats() (packetCount int64, lastPacket time.Time, stationIP, serialNumber string) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -604,6 +716,9 @@ func (l *UDPListener) GetStats() (packetCount int64, lastPacket time.Time, stati
 }
 
 // GetDeviceStatus returns the latest device status as a map (for interface compatibility)
+// with JSON-style keys (timestamp in Unix seconds, uptime, voltage, rssi,
+// hub_rssi, sensor_status, serial_number), or nil if no device_status message
+// has been received.
 func (l *UDPListener) GetDeviceStatus() interface{} {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -622,6 +737,8 @@ func (l *UDPListener) GetDeviceStatus() interface{} {
 }
 
 // GetHubStatus returns the latest hub status as a map (for interface compatibility)
+// with keys timestamp (Unix seconds), firmware_rev, uptime, rssi, reset_flags
+// and serial_number, or nil if no hub_status message has been received.
 func (l *UDPListener) GetHubStatus() interface{} {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -638,12 +755,14 @@ func (l *UDPListener) GetHubStatus() interface{} {
 	}
 }
 
-// ObservationChannel returns the channel for receiving new observations
+// ObservationChannel returns the channel for receiving new observations. The
+// channel is never closed.
 func (l *UDPListener) ObservationChannel() <-chan weather.Observation {
 	return l.observationChan
 }
 
-// IsReceivingData returns true if we've received data recently (within last 5 minutes)
+// IsReceivingData returns true if we've received data recently: any datagram
+// within the last 5 minutes.
 func (l *UDPListener) IsReceivingData() bool {
 	l.mu.RLock()
 	defer l.mu.RUnlock()

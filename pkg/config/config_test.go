@@ -34,6 +34,7 @@ func TestValidateConfigDefaults(t *testing.T) {
 	}
 }
 
+// TestLoadConfig checks that LoadConfig picks up token, station, PIN and log level from environment variables.
 func TestLoadConfig(t *testing.T) {
 	// Set env vars
 	if err := os.Setenv("TEMPEST_TOKEN", "testtoken"); err != nil {
@@ -68,6 +69,7 @@ func TestLoadConfig(t *testing.T) {
 	}
 }
 
+// TestParseSensorConfigAll checks that "all" enables every sensor.
 func TestParseSensorConfigAll(t *testing.T) {
 	config := ParseSensorConfig("all")
 	expected := SensorConfig{
@@ -85,6 +87,7 @@ func TestParseSensorConfigAll(t *testing.T) {
 	}
 }
 
+// TestParseSensorConfigMin checks that "min" enables only temperature, humidity and light.
 func TestParseSensorConfigMin(t *testing.T) {
 	config := ParseSensorConfig("min")
 	expected := SensorConfig{
@@ -102,6 +105,7 @@ func TestParseSensorConfigMin(t *testing.T) {
 	}
 }
 
+// TestParseSensorConfigTempOnly checks that "temp" enables only temperature.
 func TestParseSensorConfigTempOnly(t *testing.T) {
 	config := ParseSensorConfig("temp")
 	expected := SensorConfig{
@@ -119,6 +123,7 @@ func TestParseSensorConfigTempOnly(t *testing.T) {
 	}
 }
 
+// TestParseSensorConfigCustom checks that a comma-separated list enables exactly the named sensors.
 func TestParseSensorConfigCustom(t *testing.T) {
 	config := ParseSensorConfig("temp,humidity,wind")
 	expected := SensorConfig{
@@ -136,6 +141,7 @@ func TestParseSensorConfigCustom(t *testing.T) {
 	}
 }
 
+// TestParseElevationFeet checks that values with an "ft" suffix are converted to metres.
 func TestParseElevationFeet(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -166,6 +172,7 @@ func TestParseElevationFeet(t *testing.T) {
 	}
 }
 
+// TestParseElevationMeters checks that values with an "m" suffix are returned as metres.
 func TestParseElevationMeters(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -195,6 +202,7 @@ func TestParseElevationMeters(t *testing.T) {
 	}
 }
 
+// TestParseElevationNoUnit checks that a bare number is treated as metres.
 func TestParseElevationNoUnit(t *testing.T) {
 	// Should assume meters when no unit provided
 	result, err := parseElevation("275")
@@ -206,6 +214,7 @@ func TestParseElevationNoUnit(t *testing.T) {
 	}
 }
 
+// TestParseElevationInvalid checks that malformed elevation strings return an error.
 func TestParseElevationInvalid(t *testing.T) {
 	invalidInputs := []string{
 		"invalid",
@@ -224,6 +233,7 @@ func TestParseElevationInvalid(t *testing.T) {
 	}
 }
 
+// TestClearDatabase checks that ClearDatabase removes every file in the database directory.
 func TestClearDatabase(t *testing.T) {
 	// Create a temporary directory for testing
 	tempDir := filepath.Join(os.TempDir(), "homekit_test_db")
@@ -266,6 +276,7 @@ func TestClearDatabase(t *testing.T) {
 	}
 }
 
+// TestClearDatabaseNonExistentDir checks that clearing a missing directory is not an error.
 func TestClearDatabaseNonExistentDir(t *testing.T) {
 	// Should not error when directory doesn't exist
 	err := ClearDatabase("/non/existent/directory")
@@ -392,7 +403,8 @@ func TestValidateTokenAndStationRequired(t *testing.T) {
 	}
 }
 
-// Helper function for floating point comparison
+// abs is a helper function for floating point comparison; it returns the
+// absolute value of x.
 func abs(x float64) float64 {
 	if x < 0 {
 		return -x
@@ -400,12 +412,15 @@ func abs(x float64) float64 {
 	return x
 }
 
-// Helper function for substring checking
+// contains is a helper function for substring checking; it reports whether
+// substr occurs in s (an empty substr always matches).
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
 		(len(s) > 0 && len(substr) > 0 && indexOfSubstring(s, substr) >= 0))
 }
 
+// indexOfSubstring returns the index of the first occurrence of substr in s,
+// or -1 if it is absent.
 func indexOfSubstring(s, substr string) int {
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {

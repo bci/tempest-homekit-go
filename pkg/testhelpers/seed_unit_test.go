@@ -9,6 +9,9 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
+// TestSeedObservations_Deterministic checks that two runs with the same seed
+// produce identical timestamps, temperatures and humidities.
+//
 // Test that SeedObservationsWithOptions produces deterministic output for the same seed
 func TestSeedObservations_Deterministic(t *testing.T) {
 	base := time.Now().Truncate(time.Second)
@@ -47,6 +50,7 @@ func TestSeedObservations_Deterministic(t *testing.T) {
 	}
 }
 
+// TestClamp_EdgeCases checks clamp below, above and within the range.
 func TestClamp_EdgeCases(t *testing.T) {
 	if clamp(5, 10, 20) != 10 {
 		t.Fatalf("clamp below low failed")

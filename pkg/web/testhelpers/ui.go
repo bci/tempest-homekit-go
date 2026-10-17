@@ -1,5 +1,9 @@
 //go:build !no_browser
 
+// Package web (in directory pkg/web/testhelpers) holds a copy of the headless-browser
+// popout assertion helper also defined in pkg/web/testhelpers_ui.go. It declares package
+// name web rather than testhelpers, and nothing in the module imports it; it differs from
+// the pkg/web copy only in using golang.org/x/text/cases for the chart title.
 package web
 
 import (
@@ -19,6 +23,13 @@ import (
 // asserts the synthesized popout has the main data at datasets[0] (same length
 // as dashboard main dataset) and the average dashed two-point horizontal line
 // at datasets[1]. This is exported so other UI tests can reuse it.
+//
+// browserCtx must be a chromedp context whose page is the dashboard served by ts, with
+// charts already rendered: the popout config is built in-page from charts.<chartType>,
+// then the browser navigates to ts.URL + "/chart/<chartType>?config=...". expectedDashLen
+// is the dashboard's main-dataset length that the popout's datasets[0] must match.
+// Failures are reported with t.Fatalf. It polls up to about 4 seconds for the popout
+// chart to appear.
 func AssertPopoutDatasetOrdering(t *testing.T, browserCtx context.Context, ts *httptest.Server, chartType string, expectedDashLen int) {
 	// Build cfg JSON in-page from charts.<chartType> metadata
 	title := cases.Title(language.Und).String(chartType)

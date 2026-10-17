@@ -6,6 +6,10 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
+// TestChangeDetectionAnyChange checks the "*" operator on lightning_count: the first
+// observation sets a baseline, an unchanged value does not fire, and any increase or
+// decrease (including back to zero) fires. Cases share one Alarm and preset its previous
+// value with SetPreviousValue.
 func TestChangeDetectionAnyChange(t *testing.T) {
 	evaluator := NewEvaluator()
 	alarm := &Alarm{
@@ -88,6 +92,8 @@ func TestChangeDetectionAnyChange(t *testing.T) {
 	}
 }
 
+// TestChangeDetectionIncrease checks the ">" operator on rain_rate: it fires only when
+// the value rises above the previous one, not when it is steady or falls.
 func TestChangeDetectionIncrease(t *testing.T) {
 	evaluator := NewEvaluator()
 	alarm := &Alarm{
@@ -177,6 +183,8 @@ func TestChangeDetectionIncrease(t *testing.T) {
 	}
 }
 
+// TestChangeDetectionDecrease checks the "<" operator on lightning_distance: it fires
+// only when the distance drops below the previous one, not when it is steady or grows.
 func TestChangeDetectionDecrease(t *testing.T) {
 	evaluator := NewEvaluator()
 	alarm := &Alarm{
@@ -266,6 +274,8 @@ func TestChangeDetectionDecrease(t *testing.T) {
 	}
 }
 
+// TestChangeDetectionWithCompoundConditions checks change-detection clauses combined
+// with ordinary comparisons through && and ||.
 func TestChangeDetectionWithCompoundConditions(t *testing.T) {
 	evaluator := NewEvaluator()
 
@@ -355,6 +365,9 @@ func TestChangeDetectionWithCompoundConditions(t *testing.T) {
 	}
 }
 
+// TestChangeDetectionMultipleFields checks that one Alarm tracks previous values per
+// field independently, so evaluating different fields updates only that field's
+// baseline.
 func TestChangeDetectionMultipleFields(t *testing.T) {
 	evaluator := NewEvaluator()
 	alarm := &Alarm{
@@ -407,6 +420,8 @@ func TestChangeDetectionMultipleFields(t *testing.T) {
 	}
 }
 
+// TestChangeDetectionErrors checks that change detection errors without an alarm
+// context, on an unknown field, and when the operator has no field name.
 func TestChangeDetectionErrors(t *testing.T) {
 	evaluator := NewEvaluator()
 
@@ -464,6 +479,8 @@ func TestChangeDetectionErrors(t *testing.T) {
 	}
 }
 
+// TestBackwardCompatibility checks that plain comparisons give the same result through
+// Evaluate and through EvaluateWithAlarm with a nil alarm.
 func TestBackwardCompatibility(t *testing.T) {
 	evaluator := NewEvaluator()
 
@@ -516,7 +533,8 @@ func TestBackwardCompatibility(t *testing.T) {
 	}
 }
 
-// Helper function to create float64 pointer
+// float64Ptr returns a pointer to a copy of v, so table cases can express an optional
+// previous value (nil means no baseline).
 func float64Ptr(v float64) *float64 {
 	return &v
 }

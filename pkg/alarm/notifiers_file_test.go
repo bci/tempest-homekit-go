@@ -13,6 +13,9 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
+// TestCSVNotifier_appendToCSVFile checks that appendToCSVFile writes a header row only
+// while the file is empty, choosing the eleven-column header for a message containing
+// commas and the timestamp/message header otherwise, and appends rows on later writes.
 func TestCSVNotifier_appendToCSVFile(t *testing.T) {
 	// Create a temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "csv_test")
@@ -121,6 +124,8 @@ func TestCSVNotifier_appendToCSVFile(t *testing.T) {
 	}
 }
 
+// TestCSVNotifier_appendToCSVFile_Rotation checks that a CSV file older than maxDays is
+// renamed to a ".<timestamp>.bak" backup and a fresh file is started.
 func TestCSVNotifier_appendToCSVFile_Rotation(t *testing.T) {
 	// Create a temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "csv_rotation_test")
@@ -168,6 +173,8 @@ func TestCSVNotifier_appendToCSVFile_Rotation(t *testing.T) {
 	}
 }
 
+// TestJSONNotifier_appendToJSONFile checks that appendToJSONFile keeps the file as one
+// valid, newline-delimited JSON array and appends a record on each write.
 func TestJSONNotifier_appendToJSONFile(t *testing.T) {
 	// Create a temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "json_test")
@@ -256,6 +263,8 @@ func TestJSONNotifier_appendToJSONFile(t *testing.T) {
 	}
 }
 
+// TestJSONNotifier_appendToJSONFile_Rotation checks that a JSON file older than maxDays is
+// backed up and replaced by a new array holding only the new record.
 func TestJSONNotifier_appendToJSONFile_Rotation(t *testing.T) {
 	// Create a temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "json_rotation_test")
@@ -319,6 +328,9 @@ func TestJSONNotifier_appendToJSONFile_Rotation(t *testing.T) {
 	}
 }
 
+// TestCSVNotifier_Send checks that CSVNotifier.Send expands the channel's message
+// template into one multi-column row under the expected header, with {{message}}
+// becoming "ALARM: <name> triggered".
 func TestCSVNotifier_Send(t *testing.T) {
 	// Create a temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "csv_send_test")
@@ -420,6 +432,8 @@ func TestCSVNotifier_Send(t *testing.T) {
 	}
 }
 
+// TestJSONNotifier_Send checks that JSONNotifier.Send writes a record with a timestamp
+// and a "message" string that itself parses as the expanded JSON template.
 func TestJSONNotifier_Send(t *testing.T) {
 	// Create a temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "json_send_test")
@@ -526,6 +540,8 @@ func TestJSONNotifier_Send(t *testing.T) {
 	}
 }
 
+// TestCSVNotifier_Send_ErrorHandling checks that CSVNotifier.Send errors with "CSV
+// configuration missing for channel" when the channel has no CSV block.
 func TestCSVNotifier_Send_ErrorHandling(t *testing.T) {
 	notifier := &CSVNotifier{}
 
@@ -545,6 +561,8 @@ func TestCSVNotifier_Send_ErrorHandling(t *testing.T) {
 	}
 }
 
+// TestJSONNotifier_Send_ErrorHandling checks that JSONNotifier.Send errors with "JSON
+// configuration missing for channel" when the channel has no JSON block.
 func TestJSONNotifier_Send_ErrorHandling(t *testing.T) {
 	notifier := &JSONNotifier{}
 

@@ -1,11 +1,39 @@
-// tests/puppeteer-check.js
-// Usage: node tests/puppeteer-check.js --url=http://localhost:8086/chart/temperature --duration=10000
-// Requires: Node 14+ and puppeteer installed
+/**
+ * @module puppeteer-check
+ * @description tests/puppeteer-check.js
+ * Usage: node tests/puppeteer-check.js --url=http://localhost:8086/chart/temperature --duration=10000
+ * Requires: Node 14+ and puppeteer installed
+ *
+ * Smoke test against a running server: opens the page in headless Chrome, waits for
+ * the chart canvas or dashboard, collects console messages, page errors and failed
+ * requests for --duration ms, saves a full-page screenshot to
+ * ./puppeteer-popout.png and writes the collected results as JSON to --out
+ * (default puppeteer-console.json).
+ *
+ * Options: --url=, --duration= (ms), --out=, --headed (show the browser).
+ * Env: PUPPETEER_EXECUTABLE_PATH overrides the Chrome binary.
+ * Exit codes: 0 clean; 2 any page error, failed request, or console message of type
+ * error/assert or whose text contains "error"; 3 the run itself failed.
+ */
 
 const fs = require('fs');
 const path = require('path');
 const puppeteer = require('puppeteer');
 
+/**
+ * Collected run options.
+ * @typedef {Object} CheckOptions
+ * @property {string} url - Page to load.
+ * @property {number} duration - Milliseconds to keep collecting after load.
+ * @property {boolean} headless - false when --headed is given.
+ * @property {string} out - Path of the JSON results file.
+ */
+
+/**
+ * Parses --url=, --duration=, --out= and --headed from process.argv over defaults.
+ * Unknown arguments are ignored.
+ * @returns {CheckOptions}
+ */
 function parseArgs() {
   const args = process.argv.slice(2);
   const opts = { url: 'http://localhost:8086/chart/temperature', duration: 10000, headless: true, out: 'puppeteer-console.json' };
@@ -18,6 +46,10 @@ function parseArgs() {
   return opts;
 }
 
+/**
+ * Main: launches the browser, runs the check and exits with the status described in
+ * the file header.
+ */
 (async () => {
   const opts = parseArgs();
   const results = { url: opts.url, start: new Date().toISOString(), console: [], pageErrors: [], requestsFailed: [] };

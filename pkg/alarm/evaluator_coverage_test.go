@@ -6,6 +6,8 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
+// TestEvaluator_Compare_AllCases checks every comparison operator for the greater, less
+// and equal cases on the temperature field.
 func TestEvaluator_Compare_AllCases(t *testing.T) {
 	e := NewEvaluator()
 
@@ -50,6 +52,8 @@ func TestEvaluator_Compare_AllCases(t *testing.T) {
 	}
 }
 
+// TestEvaluator_ChangeDetection_EdgeCases checks that "*temperature" does not fire on the
+// first observation, fires when the value changes and does not fire when it repeats.
 func TestEvaluator_ChangeDetection_EdgeCases(t *testing.T) {
 	e := NewEvaluator()
 	alarm := &Alarm{
@@ -98,6 +102,8 @@ func TestEvaluator_ChangeDetection_EdgeCases(t *testing.T) {
 	}
 }
 
+// TestEvaluator_IncreaseDetection checks that ">temperature" fires on a rise and not on a
+// fall after a baseline observation.
 func TestEvaluator_IncreaseDetection(t *testing.T) {
 	e := NewEvaluator()
 	alarm := &Alarm{
@@ -138,6 +144,8 @@ func TestEvaluator_IncreaseDetection(t *testing.T) {
 	}
 }
 
+// TestEvaluator_DecreaseDetection checks that "<temperature" fires on a fall and not on a
+// rise after a baseline observation.
 func TestEvaluator_DecreaseDetection(t *testing.T) {
 	e := NewEvaluator()
 	alarm := &Alarm{
@@ -178,6 +186,8 @@ func TestEvaluator_DecreaseDetection(t *testing.T) {
 	}
 }
 
+// TestGetAvailableFields checks that GetAvailableFields is non-empty and includes every
+// documented field name and alias.
 func TestGetAvailableFields(t *testing.T) {
 	e := NewEvaluator()
 	fields := e.GetAvailableFields()

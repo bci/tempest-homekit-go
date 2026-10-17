@@ -8,9 +8,12 @@ import (
 	"time"
 )
 
-// simpleFakeUDP implements weather.UDPListener for testing CreateDataSource UDP path
+// simpleFakeUDP implements weather.UDPListener for testing CreateDataSource UDP path.
+// Every method is a no-op returning zero values; ObservationChannel returns an
+// already-closed channel.
 type simpleFakeUDP struct{}
 
+// Start is a no-op that returns nil.
 func (s *simpleFakeUDP) Start() error                                 { return nil }
 func (s *simpleFakeUDP) Stop() error                                  { return nil }
 func (s *simpleFakeUDP) GetLatestObservation() *weather.Observation   { return nil }
@@ -25,6 +28,7 @@ func (s *simpleFakeUDP) IsReceivingData() bool        { return false }
 func (s *simpleFakeUDP) GetDeviceStatus() interface{} { return nil }
 func (s *simpleFakeUDP) GetHubStatus() interface{}    { return nil }
 
+// TestCreateDataSource_UDPWithListener checks that UDP mode with a listener yields a UDP data source.
 func TestCreateDataSource_UDPWithListener(t *testing.T) {
 	cfg := &config.Config{UDPStream: true, DisableInternet: true}
 	station := &weather.Station{StationID: 123, StationName: "Test"}
@@ -37,6 +41,7 @@ func TestCreateDataSource_UDPWithListener(t *testing.T) {
 	}
 }
 
+// TestCreateDataSource_UseGeneratedWeatherDefaults checks that generated-weather mode yields a generated data source.
 func TestCreateDataSource_UseGeneratedWeatherDefaults(t *testing.T) {
 	cfg := &config.Config{UseGeneratedWeather: true}
 	station := &weather.Station{StationID: 0, StationName: "Gen"}

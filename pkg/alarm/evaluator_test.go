@@ -6,6 +6,8 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
+// approxEqual reports whether a and b differ by no more than tol, for comparing
+// unit-converted floats.
 func approxEqual(a, b, tol float64) bool {
 	if a > b {
 		return a-b <= tol
@@ -13,6 +15,8 @@ func approxEqual(a, b, tol float64) bool {
 	return b-a <= tol
 }
 
+// TestParseValueWithUnits_TemperatureF checks that "80F" on the temperature field is
+// converted to about 26.667 degrees Celsius.
 func TestParseValueWithUnits_TemperatureF(t *testing.T) {
 	e := NewEvaluator()
 	v, err := e.parseValueWithUnits("80F", "temperature")
@@ -25,6 +29,8 @@ func TestParseValueWithUnits_TemperatureF(t *testing.T) {
 	}
 }
 
+// TestParseValueWithUnits_WindMPH checks that "10mph" on the wind field is converted to
+// 4.4704 m/s.
 func TestParseValueWithUnits_WindMPH(t *testing.T) {
 	e := NewEvaluator()
 	v, err := e.parseValueWithUnits("10mph", "wind")
@@ -36,6 +42,8 @@ func TestParseValueWithUnits_WindMPH(t *testing.T) {
 	}
 }
 
+// TestEvaluate_SimpleAndCompound checks that Evaluate returns true for a simple
+// comparison, an AND of two true clauses and an OR with one true clause.
 func TestEvaluate_SimpleAndCompound(t *testing.T) {
 	e := NewEvaluator()
 	obs := &weather.Observation{AirTemperature: 20.0, RelativeHumidity: 40}
@@ -56,6 +64,8 @@ func TestEvaluate_SimpleAndCompound(t *testing.T) {
 	}
 }
 
+// TestEvaluate_InvalidFormatAndUnknownField checks that Evaluate errors on a condition
+// with no operator and on an unknown field name.
 func TestEvaluate_InvalidFormatAndUnknownField(t *testing.T) {
 	e := NewEvaluator()
 	obs := &weather.Observation{AirTemperature: 10}
@@ -71,6 +81,10 @@ func TestEvaluate_InvalidFormatAndUnknownField(t *testing.T) {
 	}
 }
 
+// TestChangeDetection_IncreaseAndAnyChange checks that the first change-detection
+// evaluation only records a baseline, that ">" fires on an increase, that "*" does not
+// fire on an unchanged value but does on a change, and that the alarm's trigger context
+// then holds the previous value.
 func TestChangeDetection_IncreaseAndAnyChange(t *testing.T) {
 	e := NewEvaluator()
 	a := &Alarm{Enabled: true}
@@ -111,6 +125,8 @@ func TestChangeDetection_IncreaseAndAnyChange(t *testing.T) {
 	}
 }
 
+// TestParaphraseAndAvailableFields checks that Paraphrase keeps a unit marker for a
+// Fahrenheit threshold and that GetAvailableFields lists "temperature".
 func TestParaphraseAndAvailableFields(t *testing.T) {
 	e := NewEvaluator()
 	p := e.Paraphrase("temperature > 80F")
@@ -135,7 +151,8 @@ func TestParaphraseAndAvailableFields(t *testing.T) {
 	}
 }
 
-// helper to check rune presence
+// containsRune reports whether rune r occurs in s (a helper for checking that a
+// paraphrase kept its unit symbol).
 func containsRune(s string, r rune) bool {
 	for _, c := range s {
 		if c == r {
@@ -145,6 +162,9 @@ func containsRune(s string, r rune) bool {
 	return false
 }
 
+// TestEvaluatorSimpleConditions checks every comparison operator and field alias against
+// one fixed observation, plus errors for an unknown field, an invalid operator (">>")
+// and a condition with no operator.
 func TestEvaluatorSimpleConditions(t *testing.T) {
 	obs := &weather.Observation{
 		AirTemperature:       30.0,
@@ -231,6 +251,8 @@ func TestEvaluatorSimpleConditions(t *testing.T) {
 	}
 }
 
+// TestEvaluatorCompoundConditions checks the truth tables of && and || for two and three
+// clauses, including that a strict ">" is false when the value equals the threshold.
 func TestEvaluatorCompoundConditions(t *testing.T) {
 	obs := &weather.Observation{
 		AirTemperature:   30.0,
@@ -276,6 +298,8 @@ func TestEvaluatorCompoundConditions(t *testing.T) {
 	}
 }
 
+// TestEvaluatorGetAvailableFields checks that GetAvailableFields returns at least ten
+// names, including the main fields and their short aliases.
 func TestEvaluatorGetAvailableFields(t *testing.T) {
 	evaluator := NewEvaluator()
 	fields := evaluator.GetAvailableFields()
@@ -309,6 +333,9 @@ func TestEvaluatorGetAvailableFields(t *testing.T) {
 	}
 }
 
+// TestEvaluatorEdgeCases checks zero-valued readings, a condition padded with
+// whitespace, and the errors for an empty condition, a missing field, a missing value
+// and a missing operator.
 func TestEvaluatorEdgeCases(t *testing.T) {
 	obs := &weather.Observation{
 		AirTemperature: 0.0,
@@ -347,6 +374,8 @@ func TestEvaluatorEdgeCases(t *testing.T) {
 	}
 }
 
+// TestEvaluatorNegativeValues checks that negative thresholds and negative readings
+// compare correctly.
 func TestEvaluatorNegativeValues(t *testing.T) {
 	obs := &weather.Observation{
 		AirTemperature:  -10.0,
@@ -379,6 +408,8 @@ func TestEvaluatorNegativeValues(t *testing.T) {
 	}
 }
 
+// TestEvaluatorFloatPrecision checks comparisons against decimal thresholds close to the
+// observed value, including exact equality on 25.5.
 func TestEvaluatorFloatPrecision(t *testing.T) {
 	obs := &weather.Observation{
 		AirTemperature: 25.5,

@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+// collectObservations runs SeedObservationsWithOptions and returns copies of
+// every observation passed to the updater, in order.
 func collectObservations(t *testing.T, chartTypes []string, base time.Time, opts SeedOptions) []weather.Observation {
 	t.Helper()
 	var out []weather.Observation
@@ -20,6 +22,8 @@ func collectObservations(t *testing.T, chartTypes []string, base time.Time, opts
 	return out
 }
 
+// TestSeedObservations_DefaultsAndSpacing checks the default of 5 points and
+// the default 5-minute timestamp spacing.
 func TestSeedObservations_DefaultsAndSpacing(t *testing.T) {
 	base := time.Now()
 	opts := SeedOptions{Points: 0, TimeSpacing: 0, RandSeed: 42, TempNoise: 0.0}
@@ -36,6 +40,8 @@ func TestSeedObservations_DefaultsAndSpacing(t *testing.T) {
 
 // Determinism is covered in seed_unit_test.go; avoid duplicate test names.
 
+// TestSeedObservations_TemperatureSeasonLocation checks that winter plus
+// desert with zero noise gives exactly 14 C.
 func TestSeedObservations_TemperatureSeasonLocation(t *testing.T) {
 	base := time.Unix(1600000000, 0)
 	// winter + desert => base temp should be 8 + 6 = 14 when TempNoise=0
@@ -49,6 +55,9 @@ func TestSeedObservations_TemperatureSeasonLocation(t *testing.T) {
 	}
 }
 
+// TestSeedObservations_RainMonotonicAndCoastalBias checks that accumulated
+// rain never decreases across generated points and that coastal accumulates at
+// least as much as inland.
 func TestSeedObservations_RainMonotonicAndCoastalBias(t *testing.T) {
 	base := time.Unix(1600000000, 0)
 	opts := SeedOptions{Points: 8, TimeSpacing: 1 * time.Minute, RandSeed: 99}
@@ -73,6 +82,8 @@ func TestSeedObservations_RainMonotonicAndCoastalBias(t *testing.T) {
 	}
 }
 
+// TestSeedObservations_UVBaseAndNoise checks that desert UV is exactly 6 when
+// UVNoise is 0.
 func TestSeedObservations_UVBaseAndNoise(t *testing.T) {
 	base := time.Unix(1600000000, 0)
 	// desert with UVNoise=0 should always equal uvBase 6

@@ -7,6 +7,7 @@ import (
 	"testing"
 )
 
+// TestGetForecast checks that GetForecast decodes daily forecast periods.
 func TestGetForecast(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// simple forecast response
@@ -35,6 +36,7 @@ func TestGetForecast(t *testing.T) {
 	}
 }
 
+// TestGetStationStatus_Non200 checks that GetStationStatus fails on an HTTP 500.
 func TestGetStationStatus_Non200(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -51,6 +53,7 @@ func TestGetStationStatus_Non200(t *testing.T) {
 	}
 }
 
+// TestGetObservationFromURL_Non200 checks that GetObservationFromURL fails on an HTTP 404.
 func TestGetObservationFromURL_Non200(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)

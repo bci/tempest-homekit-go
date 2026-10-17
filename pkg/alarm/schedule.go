@@ -7,31 +7,42 @@ import (
 	"time"
 )
 
-// Schedule defines when an alarm is active
+// Schedule defines when an alarm is active. Outside its window the alarm is
+// skipped entirely (not evaluated, so change-detection baselines are not
+// updated by the evaluator either). A nil Schedule, or Type "" or "always",
+// means always active.
 type Schedule struct {
-	// Type of schedule: "always" (default), "time", "daily", "weekly", "sun"
+	// Type of schedule: "always" (default), "time", "daily", "weekly", "sun".
+	// "time" and "daily" behave identically.
 	Type string `json:"type,omitempty"`
 
-	// TimeSchedule: specific time range (24-hour format)
-	// Example: {"start": "09:00", "end": "17:00"}
+	// StartTime and EndTime bound a time-of-day window in 24-hour "HH:MM" form,
+	// inclusive of the end minute; an end earlier than the start wraps past
+	// midnight (22:00 to 06:00). Used by "time"/"daily" and optionally "weekly".
+	// Example JSON: {"start_time": "09:00", "end_time": "17:00"}
 	StartTime string `json:"start_time,omitempty"`
 	EndTime   string `json:"end_time,omitempty"`
 
-	// WeeklySchedule: days of week (0=Sunday, 1=Monday, ..., 6=Saturday)
+	// DaysOfWeek lists the active days for "weekly" (0=Sunday, 1=Monday, ..., 6=Saturday).
 	// Example: [1,2,3,4,5] for Monday-Friday
 	DaysOfWeek []int `json:"days_of_week,omitempty"`
 
-	// SunSchedule: sunrise/sunset based
-	// Values: "sunrise", "sunset", "civil_twilight_begin", "civil_twilight_end", etc.
+	// SunEvent and SunEventEnd define a "sun" schedule. Only "sunrise" and
+	// "sunset" are accepted by [Schedule.Validate]. With no SunEventEnd the
+	// schedule is active from SunEvent until midnight; with one it is active
+	// between the two events on the same calendar day.
 	SunEvent    string `json:"sun_event,omitempty"`     // "sunrise", "sunset"
 	SunEventEnd string `json:"sun_event_end,omitempty"` // Optional: for ranges like "sunrise" to "sunset"
 
-	// Offset from sun event in minutes (can be negative for "before" or positive for "after")
+	// SunOffset and SunOffsetEnd shift SunEvent and SunEventEnd by minutes (can be
+	// negative for "before" or positive for "after").
 	// Example: -30 means 30 minutes before sunrise
 	SunOffset    int `json:"sun_offset,omitempty"`
 	SunOffsetEnd int `json:"sun_offset_end,omitempty"`
 
-	// Location for sun calculations (latitude, longitude)
+	// Latitude and Longitude give the location for sun calculations in decimal
+	// degrees. When both are 0 (or UseStationLocation is set) the location passed
+	// to [Schedule.IsActive] by the manager is used instead.
 	Latitude  float64 `json:"latitude,omitempty"`
 	Longitude float64 `json:"longitude,omitempty"`
 
@@ -48,6 +59,12 @@ type Schedule struct {
 
 // IsActive checks if the alarm should be active at the given time
 // Returns true if no schedule is defined (always active) or if current time is within schedule
+//
+// now is converted to Timezone first; a timezone that fails to load is
+// ignored and now is used as given. lat and lon (decimal degrees, typically
+// the station location) are used only by "sun" schedules. The schedule fails
+// open: an unknown type, unparsable times or an unknown location all yield
+// true rather than silencing the alarm.
 func (s *Schedule) IsActive(now time.Time, lat, lon float64) bool {
 	// No schedule or type="always" means always active
 	if s == nil || s.Type == "" || s.Type == "always" {
@@ -78,7 +95,9 @@ func (s *Schedule) IsActive(now time.Time, lat, lon float64) bool {
 	}
 }
 
-// isActiveTimeRange checks if current time is within start_time and end_time
+// isActiveTimeRange checks if current time is within start_time and end_time,
+// at minute resolution and inclusive at both ends, wrapping past midnight when
+// the end is before the start. Missing or unparsable times return true.
 func (s *Schedule) isActiveTimeRange(now time.Time) bool {
 	if s.StartTime == "" || s.EndTime == "" {
 		return true // Missing required fields, default to active
@@ -104,12 +123,15 @@ func (s *Schedule) isActiveTimeRange(now time.Time) bool {
 	return nowMinutes >= start && nowMinutes <= end
 }
 
-// isActiveDaily checks both time range and applies it daily
+// isActiveDaily checks both time range and applies it daily; it is identical
+// to isActiveTimeRange.
 func (s *Schedule) isActiveDaily(now time.Time) bool {
 	return s.isActiveTimeRange(now)
 }
 
-// isActiveWeekly checks if current day of week is in the allowed list and time is in range
+// isActiveWeekly checks if current day of week is in the allowed list and time is in range.
+// An empty DaysOfWeek means every day; the time range is checked only when
+// both StartTime and EndTime are set.
 func (s *Schedule) isActiveWeekly(now time.Time) bool {
 	if len(s.DaysOfWeek) == 0 {
 		return true // No day restriction, always active
@@ -139,7 +161,14 @@ func (s *Schedule) isActiveWeekly(now time.Time) bool {
 	return true
 }
 
-// isActiveSun checks if current time is within sunrise/sunset based schedule
+// isActiveSun checks if current time is within sunrise/sunset based schedule.
+//
+// Location: the schedule's own Latitude/Longitude are used unless
+// UseStationLocation is set or both are 0, in which case lat/lon from the
+// caller are used; if the result is still 0,0 the schedule is active. Without
+// SunEventEnd it is active from the start event until the end of the day;
+// with it, between the two events on the same day, so a range such as
+// "sunset" to "sunrise" never matches.
 func (s *Schedule) isActiveSun(now time.Time, lat, lon float64) bool {
 	// Priority order for location:
 	// 1. If UseStationLocation is true, use lat/lon passed from manager (station location)
@@ -194,7 +223,8 @@ func (s *Schedule) isActiveSun(now time.Time, lat, lon float64) bool {
 	return (now.After(startTime) || now.Equal(startTime)) && (now.Before(endTime) || now.Equal(endTime))
 }
 
-// parseTimeOfDay parses "HH:MM" format and returns minutes since midnight
+// parseTimeOfDay parses "HH:MM" format and returns minutes since midnight. It
+// returns an error when timeStr is not a valid 24-hour time.
 func parseTimeOfDay(timeStr string) (int, error) {
 	t, err := time.Parse("15:04", timeStr)
 	if err != nil {
@@ -206,6 +236,12 @@ func parseTimeOfDay(timeStr string) (int, error) {
 // calculateSunTimes calculates sunrise and sunset times for a given date and location
 // Uses simplified algorithm (adequate for scheduling purposes, not astronomical precision)
 // Algorithm based on NOAA solar calculator
+//
+// latitude and longitude are decimal degrees (east positive). The results are
+// on date's calendar day in date's location. In polar night both are midnight;
+// in polar day sunrise is 00:00:00 and sunset 23:59:59. Note the algorithm
+// yields UTC hours, but they are placed into date's location without
+// conversion, so results are only correct when date is in UTC.
 func calculateSunTimes(date time.Time, latitude, longitude float64) (sunrise, sunset time.Time) {
 	// Convert to Julian day
 	y := date.Year()
@@ -297,7 +333,12 @@ func calculateSunTimes(date time.Time, latitude, longitude float64) (sunrise, su
 	return sunrise, sunset
 }
 
-// Validate checks if the schedule configuration is valid
+// Validate checks if the schedule configuration is valid.
+//
+// A nil schedule or Type "" / "always" is valid. Otherwise the timezone must
+// load, and the type-specific fields must be present and well formed: start
+// and end times for "time"/"daily", days 0-6 (and both or neither times) for
+// "weekly", and sunrise/sunset events for "sun". Unknown types are rejected.
 func (s *Schedule) Validate() error {
 	if s == nil || s.Type == "" || s.Type == "always" {
 		return nil
@@ -365,7 +406,9 @@ func (s *Schedule) Validate() error {
 	return nil
 }
 
-// String returns a human-readable description of the schedule
+// String returns a human-readable description of the schedule, such as
+// "Daily from 09:00 to 17:00 [UTC]" or "After sunset -30m (station location)".
+// It is safe to call on a nil Schedule.
 func (s *Schedule) String() string {
 	if s == nil || s.Type == "" || s.Type == "always" {
 		return "Always active (24/7)"
@@ -431,7 +474,9 @@ func (s *Schedule) String() string {
 	}
 }
 
-// MarshalJSON implements custom JSON marshaling to handle nil schedules
+// MarshalJSON implements custom JSON marshaling to handle nil schedules,
+// encoding a nil *Schedule as null. The local Alias type drops the methods so
+// the call does not recurse.
 func (s *Schedule) MarshalJSON() ([]byte, error) {
 	if s == nil {
 		return json.Marshal(nil)
@@ -441,7 +486,9 @@ func (s *Schedule) MarshalJSON() ([]byte, error) {
 	return json.Marshal((*Alias)(s))
 }
 
-// UnmarshalJSON implements custom JSON unmarshaling
+// UnmarshalJSON implements custom JSON unmarshaling. It decodes through an
+// Alias type (avoiding recursion) with the default field mapping and returns
+// any decoding error.
 func (s *Schedule) UnmarshalJSON(data []byte) error {
 	type Alias Schedule
 	aux := (*Alias)(s)

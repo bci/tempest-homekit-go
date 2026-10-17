@@ -1,3 +1,11 @@
+// Package editor implements the standalone alarm-editor web UI: a small HTTP
+// server that serves a single-page editor (indexHTML plus static CSS/JS) and a
+// JSON API for reading, validating and saving an alarm configuration file, and
+// for managing the CONTACT_LIST and TAG_LIST values used by the editor's
+// dropdowns.
+//
+// The server keeps the configuration in memory and rewrites the whole file on
+// every successful mutation; it does not watch the file for external edits.
 package editor
 
 import (
@@ -15,7 +23,24 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
-// Server represents the alarm editor web server
+// Server represents the alarm editor web server.
+//
+// A Server holds the alarm configuration in memory and persists it to
+// configPath on every mutating API call. Its fields are not guarded by a
+// mutex, so concurrent requests share state without synchronisation.
+//
+// Fields:
+//   - configPath is the alarm config JSON file being edited, with any
+//     leading "@" already stripped.
+//   - port is the TCP port (without colon) that Start listens on.
+//   - version is the application version shown in the editor page.
+//   - envFile is an optional .env-style file from which CONTACT_LIST and
+//     TAG_LIST are read and to which they are saved; when empty the process
+//     environment (for reads) and ".env"/".env.example" (for saves) are used.
+//   - config is the in-memory alarm configuration served and mutated by the API.
+//   - lastLoadTime is when config was last read from disk; zero if it was
+//     created fresh because the file did not exist.
+//   - contacts is the contact list offered in the editor's recipient dropdowns.
 type Server struct {
 	configPath   string
 	port         string
@@ -26,14 +51,33 @@ type Server struct {
 	contacts     []Contact
 }
 
-// Contact represents a contact entry for alarm notifications
+// Contact represents a contact entry for alarm notifications.
+//
+// Contacts are stored as a JSON array in the CONTACT_LIST variable (or in
+// contacts.json when saved that way).
+//
+// Fields:
+//   - Name is the display name; required when saving.
+//   - Email is the contact's email address; must contain "@" if set.
+//   - SMS is the contact's phone number in international form; must start
+//     with "+" if set. At least one of Email or SMS is required when saving.
 type Contact struct {
 	Name  string `json:"name"`
 	Email string `json:"email"`
 	SMS   string `json:"sms"`
 }
 
-// NewServer creates a new alarm editor server
+// NewServer creates a new alarm editor server.
+//
+// configPath is the alarm configuration file to edit; a leading "@" (the
+// command-line file-reference syntax) is stripped. port is the listen port
+// without a colon, version is shown in the UI, and envFile optionally names
+// a .env file to read and write CONTACT_LIST/TAG_LIST instead of using the
+// process environment.
+//
+// A failure to load contacts is logged and ignored. If the config file does
+// not exist, an empty configuration is used and the file is created on the
+// first save. Any other read or parse error is returned.
 func NewServer(configPath, port, version, envFile string) (*Server, error) {
 	// Remove @ prefix if present
 	path := strings.TrimPrefix(configPath, "@")
@@ -67,7 +111,11 @@ func NewServer(configPath, port, version, envFile string) (*Server, error) {
 	return s, nil
 }
 
-// loadConfig loads the alarm configuration from file
+// loadConfig loads the alarm configuration from file.
+//
+// On success it replaces s.config and records lastLoadTime. It returns the
+// os.ReadFile error unwrapped (so callers can test os.IsNotExist) and a
+// wrapped error if the JSON cannot be parsed.
 func (s *Server) loadConfig() error {
 	data, err := os.ReadFile(s.configPath)
 	if err != nil {
@@ -84,7 +132,11 @@ func (s *Server) loadConfig() error {
 	return nil
 }
 
-// saveConfig saves the alarm configuration to file
+// saveConfig saves the alarm configuration to file.
+//
+// It writes s.config as indented JSON to s.configPath with mode 0644,
+// overwriting the file in place (not atomically). It returns a wrapped error
+// if marshalling or writing fails.
 func (s *Server) saveConfig() error {
 	data, err := json.MarshalIndent(s.config, "", "  ")
 	if err != nil {
@@ -99,7 +151,15 @@ func (s *Server) saveConfig() error {
 	return nil
 }
 
-// loadContacts loads the contact list from the CONTACT_LIST environment variable or from the env file
+// loadContacts loads the contact list from the CONTACT_LIST environment variable or from the env file.
+//
+// When s.envFile is set, the file is scanned line by line for
+// CONTACT_LIST='...' and the single-quoted value may span multiple lines;
+// otherwise the CONTACT_LIST environment variable is used. An empty or
+// missing value yields an empty list. Entries with an empty name, no email
+// and no SMS, an email without "@", or an SMS without a leading "+" are only
+// logged as warnings, not rejected. It returns an error if the env file
+// cannot be read or the value is not a valid JSON array of Contact.
 func (s *Server) loadContacts() error {
 	var contactListJSON string
 
@@ -174,7 +234,11 @@ func (s *Server) loadContacts() error {
 	return nil
 }
 
-// Start starts the alarm editor web server
+// Start starts the alarm editor web server.
+//
+// It registers the editor page, the static-file handler and all /api/
+// routes on a new ServeMux and blocks in http.ListenAndServe on ":"+port.
+// It returns only when the listener fails.
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
 
@@ -208,7 +272,13 @@ func (s *Server) Start() error {
 	return http.ListenAndServe(addr, mux)
 }
 
-// handleStaticFiles serves static CSS and JS files
+// handleStaticFiles serves static CSS and JS files.
+//
+// Files under /alarm-editor/static/ are served from
+// ./pkg/alarm/editor/static/ relative to the process working directory, so
+// the binary must be run from the repository root for them to be found.
+// CSS and JS responses are marked no-cache so edits show up without a hard
+// reload.
 func (s *Server) handleStaticFiles(w http.ResponseWriter, r *http.Request) {
 	// Extract filename from URL path
 	filename := strings.TrimPrefix(r.URL.Path, "/alarm-editor/static/")
@@ -231,7 +301,11 @@ func (s *Server) handleStaticFiles(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, filePath)
 }
 
-// handleIndex serves the main editor HTML page
+// handleIndex serves the main editor HTML page.
+//
+// It renders indexHTML as an html/template with ConfigPath, Port, Version,
+// EnvFile and LastLoad, responding 500 if the template fails to parse or
+// execute.
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	tmpl, err := template.New("index").Parse(indexHTML)
 	if err != nil {
@@ -258,13 +332,18 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleGetConfig returns the full alarm configuration
+// handleGetConfig returns the full alarm configuration as JSON (any method).
 func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(s.config)
 }
 
-// handleSaveConfig saves the entire configuration
+// handleSaveConfig saves the entire configuration.
+//
+// It accepts POST only (405 otherwise), decodes an alarm.AlarmConfig from the
+// body (400 on bad JSON), runs its Validate method (400 on failure), then
+// replaces the in-memory config and writes it to disk (500 on write failure).
+// On success it responds {"status":"success"}.
 func (s *Server) handleSaveConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -293,7 +372,11 @@ func (s *Server) handleSaveConfig(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 }
 
-// handleListAlarms returns all alarms with optional filtering
+// handleListAlarms returns all alarms with optional filtering.
+//
+// Query parameter "name" keeps alarms whose name contains it
+// (case-insensitive); "tag" keeps alarms carrying exactly that tag. Both
+// filters may be combined. The response is always a JSON array, never null.
 func (s *Server) handleListAlarms(w http.ResponseWriter, r *http.Request) {
 	nameFilter := r.URL.Query().Get("name")
 	tagFilter := r.URL.Query().Get("tag")
@@ -328,7 +411,13 @@ func (s *Server) handleListAlarms(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(filtered)
 }
 
-// handleCreateAlarm creates a new alarm
+// handleCreateAlarm creates a new alarm.
+//
+// It accepts POST only (405 otherwise) and decodes an alarm.Alarm from the
+// body (400 on bad JSON). It responds 409 if an alarm with the same name
+// exists and 400 if any channel fails Validate; otherwise the alarm is
+// appended and the config saved (500 on write failure). Unlike
+// handleSaveConfig it does not run full config validation.
 func (s *Server) handleCreateAlarm(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -368,7 +457,14 @@ func (s *Server) handleCreateAlarm(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 }
 
-// handleUpdateAlarm updates an existing alarm
+// handleUpdateAlarm updates an existing alarm.
+//
+// It accepts POST only (405 otherwise) and decodes the replacement
+// alarm.Alarm from the body (400 on bad JSON). The alarm to replace is found
+// by the "oldName" query parameter, defaulting to the body's name, which is
+// how renames are expressed. It responds 409 if a rename collides with
+// another alarm, 400 if a channel fails Validate, 404 if oldName is not
+// found, and 500 if saving fails.
 func (s *Server) handleUpdateAlarm(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -429,7 +525,11 @@ func (s *Server) handleUpdateAlarm(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 }
 
-// handleDeleteAlarm deletes an alarm by name
+// handleDeleteAlarm deletes an alarm by name.
+//
+// It accepts POST only (405 otherwise) and takes the name from the "name"
+// query parameter (400 if missing). It responds 404 if no alarm has that
+// name and 500 if saving fails. All alarms with a matching name are removed.
 func (s *Server) handleDeleteAlarm(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -469,7 +569,13 @@ func (s *Server) handleDeleteAlarm(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 }
 
-// handleGetTags returns all unique tags from all alarms
+// handleGetTags returns all unique tags from all alarms.
+//
+// The result also includes predefined tags from TAG_LIST, read from s.envFile
+// (single-quoted, possibly multi-line, as in loadContacts) or from the
+// environment. Read or parse problems with TAG_LIST, and suspicious tags
+// (with spaces or longer than 50 characters), are only logged. Empty tags
+// are skipped. The response is a sorted JSON array of strings.
 func (s *Server) handleGetTags(w http.ResponseWriter, r *http.Request) {
 	tagSet := make(map[string]bool)
 
@@ -556,7 +662,16 @@ func (s *Server) handleGetTags(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(tags)
 }
 
-// handleValidate validates an alarm condition
+// handleValidate validates an alarm condition.
+//
+// It accepts POST only (405 otherwise) with a body {"condition": "..."}
+// (400 on bad JSON). It first applies syntactic checks: empty input, a
+// leading or trailing && or ||, and empty operands. Only one operator kind is
+// split on (&& takes precedence), so a mixed expression's || operands are not
+// checked here. The condition is then evaluated against a fixed sample
+// observation with alarm.Evaluator.EvaluateWithAlarm. The response is
+// {"valid": bool} plus "error" when invalid or "paraphrase" (a plain-English
+// rendering) when valid; validation failures are reported with status 200.
 func (s *Server) handleValidate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -639,7 +754,15 @@ func (s *Server) handleValidate(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(response)
 }
 
-// handleValidateJSON validates a JSON message template
+// handleValidateJSON validates a JSON message template.
+//
+// It accepts POST only (405 otherwise) with a body {"template": "..."} (400
+// on bad JSON). Known {{placeholder}} tokens, including the composite
+// {{alarm_info}} and {{sensor_info}} objects, are replaced with fixed sample
+// values by simple string substitution (this mirrors, but does not call, the
+// real notifier's expansion), and the result is parsed as JSON. The response
+// is {"valid", "expanded", and "error" or "message"} with status 200 either
+// way.
 func (s *Server) handleValidateJSON(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -724,7 +847,8 @@ func (s *Server) handleValidateJSON(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(response)
 }
 
-// handleGetFields returns available fields for conditions
+// handleGetFields returns the field names available in alarm conditions, as
+// reported by alarm.Evaluator.GetAvailableFields.
 func (s *Server) handleGetFields(w http.ResponseWriter, r *http.Request) {
 	evaluator := alarm.NewEvaluator()
 	fields := evaluator.GetAvailableFields()
@@ -733,7 +857,11 @@ func (s *Server) handleGetFields(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(fields)
 }
 
-// handleGetEnvDefaults returns default values from environment variables
+// handleGetEnvDefaults returns default values from environment variables.
+//
+// The response is {"emailTo": $MS365_TO_ADDRESS, "smsTo": $SMS_TO_NUMBER},
+// used to prefill new notification channels. Unlike contacts and tags, these
+// are always read from the process environment, never from s.envFile.
 func (s *Server) handleGetEnvDefaults(w http.ResponseWriter, r *http.Request) {
 	defaults := map[string]string{
 		"emailTo": os.Getenv("MS365_TO_ADDRESS"),
@@ -744,7 +872,9 @@ func (s *Server) handleGetEnvDefaults(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(defaults)
 }
 
-// handleGetContacts returns the contact list for dropdowns
+// handleGetContacts returns the contact list for dropdowns, sorted by name.
+//
+// It sorts a copy so the stored order in s.contacts is unchanged.
 func (s *Server) handleGetContacts(w http.ResponseWriter, r *http.Request) {
 	// Create a copy of contacts to sort
 	sortedContacts := make([]Contact, len(s.contacts))
@@ -759,7 +889,16 @@ func (s *Server) handleGetContacts(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(sortedContacts)
 }
 
-// handleSaveContacts saves the contact list
+// handleSaveContacts saves the contact list.
+//
+// It accepts POST only (405 otherwise) with a body {"contacts": [...],
+// "saveType": "json"|"env"}. Each contact must have a name and an email or
+// SMS, emails must contain "@" and SMS numbers must start with "+" (400
+// otherwise). The in-memory list is replaced before the save type is checked.
+// "json" writes contacts.json in the working directory; "env" rewrites the
+// CONTACT_LIST='...' block (single- or multi-line) in s.envFile, else ".env",
+// falling back to ".env.example" if that does not exist, appending the
+// variable if absent. Any other saveType is a 400. Responds {"message": ...}.
 func (s *Server) handleSaveContacts(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -883,7 +1022,16 @@ func (s *Server) handleSaveContacts(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"message": message})
 }
 
-// handleSaveTags saves the tag list
+// handleSaveTags saves the tag list.
+//
+// It accepts POST only (405 otherwise) with a body {"tags": [...],
+// "saveType": "json"|"env"}. Tags are trimmed and must be non-empty, contain
+// no spaces and be at most 50 characters (400 otherwise). "json" writes
+// tags.json in the working directory; "env" rewrites the TAG_LIST='...' block
+// using the same file selection and replacement rules as handleSaveContacts.
+// Any other saveType is a 400. The in-memory config is not changed, since
+// tags shown by handleGetTags are re-read from the source each time.
+// Responds {"message": ...}.
 func (s *Server) handleSaveTags(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)

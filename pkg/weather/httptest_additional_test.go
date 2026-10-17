@@ -7,12 +7,13 @@ import (
 	"testing"
 )
 
-// testRoundTripper forwards any outgoing request to the provided test server URL
+// testRoundTripper forwards any outgoing request to the provided test server URL tsURL, keeping path and query, using Transport (or http.DefaultTransport when nil).
 type testRoundTripper struct {
 	tsURL     string
 	Transport http.RoundTripper
 }
 
+// RoundTrip re-issues req against the test server with the same method, body and headers.
 func (t *testRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	// Build new URL pointing to test server
 	newURL := t.tsURL + req.URL.Path
@@ -32,6 +33,7 @@ func (t *testRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 	return tr.RoundTrip(newReq)
 }
 
+// TestGetHistoricalObservationsAndForecast_WithTestServer checks history (non-empty, newest first) and forecast retrieval against a simulated WeatherFlow API.
 func TestGetHistoricalObservationsAndForecast_WithTestServer(t *testing.T) {
 	// Prepare handler to simulate WeatherFlow API
 	mux := http.NewServeMux()
@@ -107,6 +109,7 @@ func TestGetHistoricalObservationsAndForecast_WithTestServer(t *testing.T) {
 	}
 }
 
+// TestParseStationStatusHTML_Simple checks that battery and uptime are extracted from a single-line HTML fragment.
 func TestParseStationStatusHTML_Simple(t *testing.T) {
 	html := `<div><span class="lv-param-label">Battery Voltage</span><span class="lv-value-display"> Good (2.69v)</span>` +
 		`<span class="lv-param-label">Uptime</span><span class="lv-value-display">63d 13h 6m 1s</span>` +

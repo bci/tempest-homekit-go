@@ -182,3 +182,38 @@ Notes and follow-ups:
 Estimate: ~30-60 minutes of editorial and release tasks (docs, tagging, release creation).
 
 ---
+## 2026-10-16 — Documentation pass (branch `overnight-docs`)
+
+Why: CLAUDE.md §11 requires complete in-language documentation (GoDoc, JSDoc, Google Shell
+Style headers, PEP 257) on every declaration, and the repo had large gaps — most unexported
+Go functions, all test functions, nearly all of `pkg/web/static/script.js` and the shell
+scripts were undocumented, and several packages carried more than one `// Package` comment.
+The prose docs had also drifted from the code (Go version, coverage numbers, architecture
+tree, a "cross-platform" heading that ran the single-platform script).
+
+What changed (comments and docs only — no code behaviour):
+- GoDoc on every Go file (source and tests): one package comment per package, every func,
+  method, type, const and var. Fields of column-aligned structs and one-line fake methods in
+  tests are described in the type's doc comment, because a comment line between aligned
+  fields makes gofmt re-pad the code lines.
+- JSDoc on all first-party JS (dashboard `script.js`, alarm editor `script.js`, helpers,
+  Jest tests and configs, tools/tests scripts). Skipped as third-party: `chart.umd.js(.map)`,
+  `chartjs-adapter-date-fns.bundle.min.js`, `qrcode.min.js`, `qrcode-browser.js` (a copy of
+  node-qrcode's `lib/browser.js`), and `date-fns.min.js` (an HTTP "Not found" body).
+- Google Shell Style headers and Globals/Arguments/Outputs/Returns blocks on all shell
+  scripts and the pre-commit hook; PEP 257 docstrings on the Python helpers. Style-guide
+  code changes ([[ ]], local, main) were deliberately not made.
+- Doc comments that were factually wrong were corrected (e.g. `logger.Info`, `Schedule`
+  JSON keys, `maskString`, `NewWeatherSystemModern`, `GetConfig`'s "copy").
+- README: Go 1.24+, measured coverage (44.2%, was claimed 60.3%), test/lint/Jest/hook
+  commands, accurate architecture tree, build-script headings. New AGENTS.md and
+  features.yaml. Two broken links in docs/development fixed.
+
+How it was verified: every tracked .go file at tag `pre-docs` and now was parsed without
+comments and printed canonically — identical; `//go:` directives identical; JS token streams,
+Python ASTs (minus docstrings) and shell non-comment lines identical. `go build`, `go vet`,
+`go test ./...` (incl. headless Chrome) and Jest (7 suites / 14 tests) pass before and after;
+golangci-lint reports the same 5 pre-existing staticcheck findings before and after.
+
+Bugs noticed during the pass were not fixed here; they are in `docs/code-review/2026-10-16.md`
+on the `code-review` branch.

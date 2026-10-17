@@ -5,6 +5,9 @@ import (
 	"time"
 )
 
+// TestManager_Getters checks the Manager accessors (GetConfig, GetAlarmCount,
+// GetEnabledAlarmCount, GetConfigPath, GetLastLoadTime) on a hand-built Manager, and the
+// counts for an empty alarm list.
 func TestManager_Getters(t *testing.T) {
 	// Create a test alarm configuration
 	config := &AlarmConfig{
@@ -112,6 +115,9 @@ func TestManager_Getters(t *testing.T) {
 	})
 }
 
+// TestAlarm_Getters checks the Alarm cooldown accessors (GetLastFired,
+// GetCooldownRemaining, IsInCooldown) for in-cooldown, expired and never-fired alarms,
+// and that GetTriggerValue returns a value set with SetTriggerContext.
 func TestAlarm_Getters(t *testing.T) {
 	now := time.Now()
 	alarm := &Alarm{

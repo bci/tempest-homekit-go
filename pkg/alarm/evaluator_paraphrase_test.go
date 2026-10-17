@@ -4,6 +4,9 @@ import (
 	"testing"
 )
 
+// TestParaphrase checks the exact English produced by Evaluator.Paraphrase for simple
+// comparisons with and without units, the change-detection prefixes (*, >, <), AND/OR
+// chains, equality operators and the empty condition.
 func TestParaphrase(t *testing.T) {
 	evaluator := NewEvaluator()
 
@@ -114,6 +117,8 @@ func TestParaphrase(t *testing.T) {
 	}
 }
 
+// TestFormatFieldName checks that formatFieldName maps field names and their aliases to
+// human-readable labels and passes unknown names through unchanged.
 func TestFormatFieldName(t *testing.T) {
 	evaluator := NewEvaluator()
 
@@ -148,6 +153,8 @@ func TestFormatFieldName(t *testing.T) {
 	}
 }
 
+// TestFormatValue checks that formatValue renders F/C suffixes (either case) as degree
+// symbols, spaces out mph and m/s units, and leaves bare numbers unchanged.
 func TestFormatValue(t *testing.T) {
 	evaluator := NewEvaluator()
 

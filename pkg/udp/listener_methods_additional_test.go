@@ -7,9 +7,9 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
-// Test that addObservation rolls over when capacity is reached and that
-// GetLatestObservation returns a copy (modifying returned slice/item doesn't
-// affect internal storage).
+// TestAddObservationRolloverAndGetLatestCopy tests that addObservation rolls over
+// when capacity is reached and that GetLatestObservation returns a copy
+// (modifying returned slice/item does not affect internal storage).
 func TestAddObservationRolloverAndGetLatestCopy(t *testing.T) {
 	l := &UDPListener{
 		observations:   make([]weather.Observation, 0, 3),
@@ -47,7 +47,8 @@ func TestAddObservationRolloverAndGetLatestCopy(t *testing.T) {
 	}
 }
 
-// Test parsing of device and hub status fields from sample messages.
+// TestDeviceAndHubStatusParsing tests parsing of device and hub status fields from
+// sample messages, and that processObservationAir adds an observation.
 func TestDeviceAndHubStatusParsing(t *testing.T) {
 	// Construct a UDP message and ensure device/hub status processing stores values
 	l := &UDPListener{}

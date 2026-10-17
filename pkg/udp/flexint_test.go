@@ -5,6 +5,7 @@ import (
 	"testing"
 )
 
+// TestFlexIntParsing checks that firmware_revision decodes from both JSON numbers and numeric strings.
 func TestFlexIntParsing(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -63,6 +64,7 @@ func TestFlexIntParsing(t *testing.T) {
 	}
 }
 
+// TestFlexIntInvalidValues checks that non-numeric and empty firmware_revision strings decode as 0 without error.
 func TestFlexIntInvalidValues(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -9,6 +9,8 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
+// TestSeedObservations_CountsAndTimestamps checks the total observation count
+// and that each chart type's chunk steps back from base in 5-minute intervals.
 func TestSeedObservations_CountsAndTimestamps(t *testing.T) {
 	chartTypes := []string{"temperature", "humidity", "rain"}
 	base := time.Now().Truncate(time.Second)
@@ -48,6 +50,9 @@ func TestSeedObservations_CountsAndTimestamps(t *testing.T) {
 	}
 }
 
+// TestSeedObservations_ValueRanges checks that each chart type's values fall
+// in plausible ranges for the desert profile and that timestamps are 5 minutes
+// apart.
 func TestSeedObservations_ValueRanges(t *testing.T) {
 	chartTypes := []string{"temperature", "humidity", "rain", "pressure", "wind", "light", "uv"}
 	base := time.Now()

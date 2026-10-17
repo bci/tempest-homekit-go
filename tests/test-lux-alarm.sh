@@ -2,6 +2,20 @@
 
 # Test script to verify "Lux Change" alarm triggers correctly
 # This simulates the lux changes the user observed
+#
+# Runs the app in the foreground for 30 s (`timeout 30s`) with
+# --alarms @tempest-alarms.json on the default web port, tees all output to
+# /tmp/lux-test-output.txt, then reports whether "Alarm triggered: Lux Change"
+# appeared. Live weather data is used; nothing is simulated by the script.
+# `timeout` is GNU coreutils: absent on stock macOS, where the app is never
+# started and the test reports a failure.
+#
+# Manual smoke test, not part of `go test` or CI: it prints results for a
+# person to read and exits 0 whether or not the checks pass. Run it from the
+# repository root after `go build` (it executes ./tempest-homekit-go and reads
+# ./tempest-alarms.json).
+#
+# Usage: ./tests/test-lux-alarm.sh
 
 echo "=========================================="
 echo "Testing Lux Change Alarm with *lux operator"

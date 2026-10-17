@@ -1,17 +1,76 @@
-// Small test harness for unit conversion helpers used by chart.html
-// Run with: node pkg/web/static/test/conversion_harness.js
+/**
+ * @module conversion_harness
+ * @description Small test harness for unit conversion helpers used by chart.html.
+ * Run with: node pkg/web/static/test/conversion_harness.js
+ *
+ * The helpers below are local copies of the formulas, not imports, so this harness
+ * checks the constants rather than chart.html itself. Exits with status 2 if any
+ * case fails. Not picked up by Jest (it is not under __tests__/).
+ */
 
+/**
+ * Celsius to Fahrenheit.
+ * @param {number} c
+ * @returns {number}
+ */
 function toF(c){ return (c*9.0/5.0)+32.0 }
+/**
+ * Fahrenheit to Celsius.
+ * @param {number} f
+ * @returns {number}
+ */
 function toC(f){ return (f-32.0)*5.0/9.0 }
+/**
+ * Inches of mercury to millibars (hPa).
+ * @param {number} v
+ * @returns {number}
+ */
 function inHgToMb(v){ return v*33.8638866667 }
+/**
+ * Millibars (hPa) to inches of mercury.
+ * @param {number} v
+ * @returns {number}
+ */
 function mbToInHg(v){ return v/33.8638866667 }
+/**
+ * Miles per hour to kilometres per hour.
+ * @param {number} v
+ * @returns {number}
+ */
 function mphToKmh(v){ return v*1.609344 }
+/**
+ * Kilometres per hour to miles per hour.
+ * @param {number} v
+ * @returns {number}
+ */
 function kmhToMph(v){ return v/1.609344 }
+/**
+ * Inches to millimetres.
+ * @param {number} v
+ * @returns {number}
+ */
 function inchesToMm(v){ return v*25.4 }
+/**
+ * Millimetres to inches.
+ * @param {number} v
+ * @returns {number}
+ */
 function mmToInches(v){ return v/25.4 }
 
+/**
+ * Absolute-tolerance float comparison.
+ * @param {number} a
+ * @param {number} b
+ * @param {number} [tol=1e-6]
+ * @returns {boolean} true when |a - b| <= tol.
+ */
 function approxEqual(a,b, tol=1e-6){ return Math.abs(a-b) <= tol }
 
+/**
+ * Runs every conversion case, printing ok/FAIL per case. Pressure cases use a 0.05
+ * tolerance (29.92 inHg is a rounded figure for 1013.25 mb); the rest use 1e-3.
+ * @returns {void} Calls process.exit(2) if any case fails.
+ */
 function runTests(){
   const tests = []
   // temperature
@@ -48,4 +107,5 @@ function runTests(){
   }
 }
 
+// Run only when executed directly, not when required.
 if(require.main === module){ runTests() }

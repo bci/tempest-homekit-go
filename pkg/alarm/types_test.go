@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+// TestAlarmConfigValidateIndividualAlarms checks that AlarmConfig.Validate rejects an
+// alarm without a name, a condition or at least one channel.
 func TestAlarmConfigValidateIndividualAlarms(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -78,6 +80,8 @@ func TestAlarmConfigValidateIndividualAlarms(t *testing.T) {
 	}
 }
 
+// TestAlarmCanFire checks CanFire for a never-fired alarm, cooldowns that have and have
+// not expired, a zero cooldown and a disabled alarm.
 func TestAlarmCanFire(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -159,6 +163,9 @@ func TestAlarmCanFire(t *testing.T) {
 	}
 }
 
+// TestChannelValidate checks Channel.Validate for every channel type: the required
+// template or per-type block, CSV/JSON paths (with a default message filled in when
+// empty), webhook URL and body, and empty or unknown types.
 func TestChannelValidate(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -346,6 +353,9 @@ func TestChannelValidate(t *testing.T) {
 	}
 }
 
+// TestAlarmConfigValidate checks AlarmConfig.Validate for a valid config, duplicate
+// alarm names, an invalid alarm, and an empty config, which is allowed so the manager can
+// wait for the file to be filled in.
 func TestAlarmConfigValidate(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -420,6 +430,8 @@ func TestAlarmConfigValidate(t *testing.T) {
 	}
 }
 
+// TestLoadAlarmConfig checks LoadAlarmConfig with inline JSON, an "@" file reference,
+// malformed JSON and a missing file.
 func TestLoadAlarmConfig(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -510,6 +522,8 @@ func TestLoadAlarmConfig(t *testing.T) {
 	}
 }
 
+// TestAlarmJSON checks that an Alarm with tags and console and email channels round-trips
+// through JSON.
 func TestAlarmJSON(t *testing.T) {
 	alarm := Alarm{
 		Name:        "test-alarm",

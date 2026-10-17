@@ -1,4 +1,5 @@
-// Package weather provides the API data source implementation.
+// This file provides the API data source implementation.
+
 package weather
 
 import (
@@ -9,7 +10,20 @@ import (
 	"tempest-homekit-go/pkg/logger"
 )
 
-// APIDataSource implements DataSource for WeatherFlow API polling
+// APIDataSource implements DataSource for WeatherFlow API polling. It fetches an
+// observation immediately on Start and then every 60 seconds, and the forecast
+// on Start and then every 30 minutes. With a custom URL it polls that URL
+// instead of the WeatherFlow station endpoint, and if the URL's path is the
+// generated-weather path it reports itself as DataSourceGenerated and skips
+// forecasts. It is safe for concurrent use.
+//
+// Fields: stationID, token and stationName identify the WeatherFlow station;
+// customURL, generated and generatedPath are described inline; mu guards the
+// fields below it; latestObservation and latestForecast hold the most recent
+// data; observationChan (buffer 100) delivers observations and is closed by
+// Stop; stopChan is closed by Stop to end pollLoop; observationCount and
+// lastUpdate count successful fetches; running is true between Start and Stop;
+// wg lets Stop wait for pollLoop to exit.
 type APIDataSource struct {
 	stationID     int
 	token         string
@@ -29,13 +43,23 @@ type APIDataSource struct {
 	wg                sync.WaitGroup
 }
 
-// APIDataSourceOptions holds optional parameters for creating APIDataSource
+// APIDataSourceOptions holds optional parameters for creating APIDataSource.
+//
+// Fields:
+//
+//   - CustomURL, if non-empty, is polled instead of the WeatherFlow station
+//     observations endpoint. It must serve the same JSON shape.
+//   - GeneratedPath is the URL path of the local generated-weather endpoint
+//     (default "/api/generate-weather"); a CustomURL with exactly this path
+//     marks the source as generated.
 type APIDataSourceOptions struct {
 	CustomURL     string
 	GeneratedPath string
 }
 
-// NewAPIDataSource creates a new API-based data source with options.
+// NewAPIDataSource creates a new API-based data source with options. token is
+// the WeatherFlow access token (unused when opts.CustomURL is set, except for
+// forecasts). Call Start to begin polling.
 func NewAPIDataSource(stationID int, token, stationName string, opts APIDataSourceOptions) *APIDataSource {
 	a := &APIDataSource{
 		stationID:       stationID,
@@ -65,7 +89,9 @@ func NewAPIDataSource(stationID int, token, stationName string, opts APIDataSour
 	return a
 }
 
-// Start begins polling the API for weather data
+// Start begins polling the API for weather data in a background goroutine and
+// returns the observation channel. Calling it while already running returns the
+// same channel. It never fails; fetch errors are logged.
 func (a *APIDataSource) Start() (<-chan Observation, error) {
 	a.mu.Lock()
 	if a.running {
@@ -82,7 +108,9 @@ func (a *APIDataSource) Start() (<-chan Observation, error) {
 	return a.observationChan, nil
 }
 
-// Stop gracefully shuts down the API data source
+// Stop gracefully shuts down the API data source: it stops the polling goroutine,
+// waits for it to exit and then closes the observation channel. It is a no-op if
+// not running and always returns nil. The source cannot be restarted afterwards.
 func (a *APIDataSource) Stop() error {
 	a.mu.Lock()
 	if !a.running {
@@ -106,21 +134,22 @@ func (a *APIDataSource) Stop() error {
 	return nil
 }
 
-// GetLatestObservation returns the most recent observation
+// GetLatestObservation returns the most recent observation, or nil before the first successful fetch.
 func (a *APIDataSource) GetLatestObservation() *Observation {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.latestObservation
 }
 
-// GetForecast returns the latest forecast data
+// GetForecast returns the latest forecast data, or nil if none has been fetched (always nil for generated weather).
 func (a *APIDataSource) GetForecast() *ForecastResponse {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.latestForecast
 }
 
-// GetStatus returns the current status of the API data source
+// GetStatus returns the current status of the API data source; its Type is the
+// same as GetType.
 func (a *APIDataSource) GetStatus() DataSourceStatus {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
@@ -144,7 +173,9 @@ func (a *APIDataSource) GetStatus() DataSourceStatus {
 	}
 }
 
-// GetType returns the data source type
+// GetType returns the data source type: DataSourceGenerated for the generated
+// weather endpoint, DataSourceCustomURL for any other custom URL, and
+// DataSourceAPI otherwise.
 func (a *APIDataSource) GetType() DataSourceType {
 	if a.customURL != "" {
 		if a.generated {
@@ -155,7 +186,8 @@ func (a *APIDataSource) GetType() DataSourceType {
 	return DataSourceAPI
 }
 
-// pollLoop is the main polling loop that fetches data every 60 seconds
+// pollLoop is the main polling loop that fetches data every 60 seconds, plus the
+// forecast every 30 ticks, until stopChan is closed.
 func (a *APIDataSource) pollLoop() {
 	logger.Info("Starting API data source polling loop (60 second interval)")
 
@@ -188,7 +220,9 @@ func (a *APIDataSource) pollLoop() {
 	}
 }
 
-// fetchObservation retrieves a single observation from the API
+// fetchObservation retrieves a single observation from the API (or the custom
+// URL), records it as the latest and, while running, offers it to the channel
+// without blocking. Errors are logged and the observation is skipped.
 func (a *APIDataSource) fetchObservation() {
 	logger.Debug("API data source: fetching observation")
 
@@ -235,7 +269,9 @@ func (a *APIDataSource) fetchObservation() {
 	}
 }
 
-// fetchForecast retrieves forecast data from the API
+// fetchForecast retrieves forecast data from the API for stationID and stores it.
+// It is skipped for generated weather; errors are logged and the previous
+// forecast is kept.
 func (a *APIDataSource) fetchForecast() {
 	// Skip forecast for generated weather
 	if a.generated {

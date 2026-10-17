@@ -10,7 +10,10 @@ import (
 	"tempest-homekit-go/pkg/logger"
 )
 
-// captureLogOutput captures log output during test execution
+// captureLogOutput captures log output during test execution: it sets the logger
+// level to "info" so validation warnings are emitted, redirects the standard log package
+// to a buffer while f runs, and returns what was written. It restores log output to
+// os.Stderr afterwards but leaves the logger level at "info".
 func captureLogOutput(f func()) string {
 	var buf bytes.Buffer
 	// Set log level to info so validation warnings are captured
@@ -21,6 +24,11 @@ func captureLogOutput(f func()) string {
 	return buf.String()
 }
 
+// TestValidateConfigProviders checks the warnings validateConfigProviders logs: none
+// for console-only or disabled alarms or for a fully configured SMTP setup, and specific
+// warnings naming the missing variables when email or SMS channels are used without a
+// provider or with a partially configured SMTP or Twilio provider. Environment variables
+// are restored afterwards.
 func TestValidateConfigProviders(t *testing.T) {
 	// Save original env vars
 	origVars := map[string]string{

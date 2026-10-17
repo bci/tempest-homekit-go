@@ -8,7 +8,7 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
-// createObsST builds a minimal obs_st payload (18 fields) with predictable values
+// createObsST builds a minimal obs_st payload (18 fields) with predictable values and timestamp ts.
 func createObsST(ts int64) [][]interface{} {
 	obs := make([]interface{}, 18)
 	obs[0] = float64(ts)
@@ -32,6 +32,7 @@ func createObsST(ts int64) [][]interface{} {
 	return [][]interface{}{obs}
 }
 
+// TestProcessObservationST_AddsObservationAndPrettyPrints checks that an obs_st message pretty-prints and is added to the history.
 func TestProcessObservationST_AddsObservationAndPrettyPrints(t *testing.T) {
 	l := &UDPListener{observations: make([]weather.Observation, 0, 10), maxHistorySize: 10}
 
@@ -53,6 +54,7 @@ func TestProcessObservationST_AddsObservationAndPrettyPrints(t *testing.T) {
 	}
 }
 
+// TestPrettyPrintMessage_OtherTypes checks that every other message type pretty-prints to a non-empty line.
 func TestPrettyPrintMessage_OtherTypes(t *testing.T) {
 	now := float64(time.Now().Unix())
 

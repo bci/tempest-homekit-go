@@ -1,5 +1,90 @@
-// Debug logging configuration
+/**
+ * Browser dashboard script for the Tempest HomeKit web console.
+ *
+ * Loaded as a classic (non-module) script by the main dashboard page and by the
+ * single-chart popout page (`/chart/<type>`). It polls the Go server's JSON API
+ * (`/api/weather`, `/api/status`, `/api/alarm-status`, `/api/history`,
+ * `/api/units`), renders the sensor cards, forecast, station/HomeKit status and
+ * alarm list, and drives the Chart.js time-series charts. Everything lives in the
+ * global scope because the HTML calls several functions from inline `onclick`
+ * handlers. The jest tests under `__tests__/` load this file into jsdom and use the
+ * CommonJS export of {@link updateAlarmStatus} at the bottom of the file.
+ *
+ * Unit conventions: the server sends temperature in °C, pressure in mb, rain
+ * amounts in mm and rain rate in mm/hr; values are converted for display
+ * according to {@link units}. Chart data points are stored already converted to
+ * the current display units.
+ *
+ * @module pkg/web/static/script
+ * @file Dashboard and popout-chart logic for the Tempest HomeKit web console.
+ */
+/**
+ * A time-series point as stored in Chart.js datasets.
+ * @typedef {Object} ChartPoint
+ * @property {(Date|number|string)} x Timestamp (normalised to a Date by {@link validateAndSortChartData}).
+ * @property {number} y Value in the current display unit.
+ */
+/**
+ * Display unit selection.
+ * @typedef {Object} Units
+ * @property {string} temperature `'celsius'` or `'fahrenheit'`.
+ * @property {string} wind `'mph'`, `'kph'` (set by {@link toggleUnit}) or `'kmh'` (set by {@link loadUnitsConfig}).
+ * @property {string} rain `'inches'` or `'mm'`.
+ * @property {string} pressure `'mb'` or `'inHg'`.
+ */
+/**
+ * The `/api/weather` payload fields this script reads.
+ * @typedef {Object} WeatherData
+ * @property {number} temperature Air temperature, °C.
+ * @property {number} humidity Relative humidity, %.
+ * @property {number} windSpeed Average wind speed.
+ * @property {number} windGust Wind gust speed.
+ * @property {number} windDirection Wind direction, degrees.
+ * @property {number} rainAccum Incremental rain since the previous observation, mm.
+ * @property {number} rainDailyTotal Rain since local midnight, mm.
+ * @property {number} rainRate Rain intensity, mm/hr.
+ * @property {number} [precipitationType] 0 none, 1 rain, 2 hail, 3 rain + hail.
+ * @property {number} [lightningStrikeCount] Lightning strike count.
+ * @property {number} [lightningStrikeAvg] Average strike distance, km.
+ * @property {number} pressure Station pressure, mb.
+ * @property {number} [seaLevelPressure] Sea-level pressure, mb.
+ * @property {string} [pressure_condition] Server-side pressure analysis text.
+ * @property {string} [pressure_trend] Server-side pressure trend text.
+ * @property {string} [weather_forecast] Server-side pressure-based forecast text.
+ * @property {number} illuminance Illuminance, lux.
+ * @property {number} uv UV index.
+ * @property {string} lastUpdate Observation time (parseable by `Date`).
+ * @property {number} [battery] Battery voltage, V (0 when unknown).
+ * @property {number} [observationCount] Observations held by the server.
+ * @property {number} [maxHistorySize] Server history capacity.
+ * @property {Object} [unitHints] Optional hint of the units the raw data uses.
+ */
+/**
+ * The `/api/alarm-status` payload.
+ * @typedef {Object} AlarmStatus
+ * @property {boolean} enabled Whether alarm processing is active.
+ * @property {boolean} [disabled] Whether alarms are explicitly disabled.
+ * @property {string} configPath Alarm configuration location.
+ * @property {string} lastReadTime When the configuration was last read.
+ * @property {number} totalAlarms Number of configured alarms.
+ * @property {number} enabledAlarms Number of enabled alarms.
+ * @property {Array<Object>} alarms Alarms with `name`, `enabled`, `condition`, `tags`,
+ *   `channels`, `lastTriggered`, `triggeredCount`, `cooldown`, `inCooldown`,
+ *   `cooldownRemaining`, `hasSchedule` and `scheduleActive`.
+ */
+/**
+ * Whether verbose debug mode is on.
+ *
+ * Set from `?loglevel=debug` or `localStorage.loglevel === 'debug'` at load time,
+ * and again by the DOMContentLoaded handler. It also gates the definition of the
+ * `window.testCharts` / `window.diagnoseCharts` helpers.
+ * @type {boolean}
+ */
 let DEBUG_MODE = false;
+/**
+ * Numeric log levels passed as the first argument to {@link debugLog}.
+ * @type {{DEBUG: number, INFO: number, WARN: number, ERROR: number}}
+ */
 const logLevels = {
     DEBUG: 0,
     INFO: 1, 
@@ -7,19 +92,40 @@ const logLevels = {
     ERROR: 3
 };
 
-// Check log level from URL parameter or localStorage
+/**
+ * Query-string parameters of the current page, used to check `loglevel` (from the
+ * URL parameter or localStorage) at load time.
+ * @type {URLSearchParams}
+ */
 const urlParams = new URLSearchParams(window.location.search);
 if (urlParams.get('loglevel') === 'debug' || localStorage.getItem('loglevel') === 'debug') {
     DEBUG_MODE = true;
     console.log('🐛 DEBUG MODE ENABLED - Will log calculated values, API calls and responses');
 }
 
-// Enhanced debug logger
+/**
+ * Enhanced debug logger.
+ *
+ * A no-op under jest (when `global.__JEST__` is set) and `console.log` otherwise.
+ * Callers pass a {@link logLevels} value first; the level is printed as a number
+ * and is not used to filter output, and {@link DEBUG_MODE} is not consulted.
+ * @type {function(...*): void}
+ */
 const debugLog = (typeof global !== 'undefined' && global.__JEST__) ? (() => {}) : console.log;
 
-// Global variable to track data source type for better error messaging
+/**
+ * Global variable that tracks the data source type reported by `/api/status`
+ * (`status.dataSource.type`, e.g. `'udp'`, `'api'`, `'generated'`), used for better
+ * error messaging when a weather fetch fails.
+ * @type {?string}
+ */
 let currentDataSourceType = null;
 
+/**
+ * Current display units, initialised from localStorage and later overwritten by
+ * {@link loadUnitsConfig}. Changed by {@link toggleUnit}.
+ * @type {Units}
+ */
 let units = {
     temperature: localStorage.getItem('temperature-unit') || 'celsius',
     wind: localStorage.getItem('wind-unit') || 'mph',
@@ -27,7 +133,14 @@ let units = {
     pressure: localStorage.getItem('pressure-unit') || 'mb'
 };
 
-// Friendly unit label helper (keeps formatting consistent with chart.html)
+/**
+ * Friendly unit label helper; keeps formatting consistent with chart.html.
+ *
+ * @param {string} key Unit family, e.g. `'temperature'`, `'wind'`, `'rain'`, `'pressure'`.
+ * @param {string} val Unit token, e.g. `'celsius'`, `'kmh'`, `'inHg'`.
+ * @returns {string} The display label (e.g. `'°C'`, `'km/h'`), or `val` itself when unmapped,
+ *   or `''` when `val` is empty.
+ */
 function prettyUnitLabel(key, val) {
     const map = {
         temperature: { celsius: '°C', fahrenheit: '°F' },
@@ -42,7 +155,17 @@ function prettyUnitLabel(key, val) {
     return (km[val] || val || '').toString();
 }
 
-// Load units configuration from server
+/**
+ * Load units configuration from the server (`GET /api/units`).
+ *
+ * Maps the server's `units` setting (`imperial`, `metric`, `sae`) onto the
+ * client {@link units} object, copies `unitsPressure` verbatim, and persists all
+ * four choices to localStorage.
+ *
+ * @async
+ * @returns {Promise<boolean>} `true` on success, `false` if the request or JSON parse failed
+ *   (the existing units are kept).
+ */
 async function loadUnitsConfig() {
     try {
         const response = await fetch('/api/units');
@@ -82,14 +205,44 @@ async function loadUnitsConfig() {
     }
 }
 
+/**
+ * Latest `/api/weather` payload, or `null` before the first successful fetch.
+ * @type {?WeatherData}
+ */
 let weatherData = null;
+/**
+ * Current forecast data, stored so the forecast can be re-rendered on unit changes.
+ * @type {?Object}
+ */
 let forecastData = null; // Store current forecast data for unit conversions
+/**
+ * Current `/api/status` payload, stored for unit conversions (elevation) and chart history filtering.
+ * @type {?Object}
+ */
 let statusData = null; // Store current status data for unit conversions
+/**
+ * Live Chart.js instances keyed by chart name (`temperature`, `humidity`, `wind`, `rain`,
+ * `pressure`, `light`, `uv`). On the popout page it instead holds `popout` (the chart)
+ * and `popoutType` (the chart type string).
+ * @type {Object<string, *>}
+ */
 const charts = {};
 
-// Provide a global openChartPopout so click handlers can call it even if
-// forceChartColors() or other initialization hasn't finished. This mirrors
-// the per-dataset metadata encoding used by the internal helper.
+/**
+ * Global `openChartPopout` so click handlers can call it even if
+ * {@link forceChartColors} or other initialization hasn't finished.
+ *
+ * This mirrors the per-dataset metadata encoding used by the internal helper of
+ * the same name inside {@link forceChartColors}, but omits the `incomingUnits` and
+ * `theme` fields. Only defined if `window.openChartPopout` is not already set.
+ * Opens `/chart/<type>?config=<json>` in a new tab; errors are logged, not thrown.
+ *
+ * @param {string} type Chart key in {@link charts} (also the popout URL path segment).
+ * @param {string} field Observation field name passed through in the config.
+ * @param {string} title Title passed through in the config.
+ * @param {string} color Main line colour passed through in the config.
+ * @returns {void}
+ */
 window.openChartPopout = window.openChartPopout || function(type, field, title, color) {
     try {
         const chartObj = charts[type];
@@ -126,27 +279,66 @@ window.openChartPopout = window.openChartPopout || function(type, field, title, 
     }
 };
 
-// Expose minimal debug hooks for automated tests / headless browsers.
-// These do not alter application behavior and simply return current in-memory state.
+/**
+ * Debug hook for automated tests / headless browsers. Does not alter
+ * application behavior; it simply returns current in-memory state.
+ * @returns {?WeatherData} The current {@link weatherData}.
+ */
 window.getWeatherData = function() { return weatherData; };
+/**
+ * Debug hook for automated tests / headless browsers; returns the in-memory chart map.
+ * @returns {Object<string, *>} The {@link charts} object.
+ */
 window.getCharts = function() { return charts; };
+/**
+ * Maximum points kept in each live chart dataset before the oldest is dropped
+ * (as specified in requirements).
+ * @type {number}
+ */
 const maxDataPoints = 1000; // As specified in requirements
 
-// Ensure a given dataset index exists on a chart. Creates a minimal dataset if missing.
-// Guard counter to avoid infinite retry loops when initializing charts fails repeatedly
+/**
+ * Guard counter to avoid infinite retry loops when initializing charts fails repeatedly
+ * (the resilient initializer gives up after 8 attempts).
+ * @type {number}
+ */
 let __chartInitAttempts = 0;
-// Flag to indicate charts have been successfully initialized
+/**
+ * Flag to indicate charts have been successfully initialized.
+ * @type {boolean}
+ */
 let __chartsInitialized = false;
-// Flag to indicate vendor Chart.js is currently being loaded
+/**
+ * Flag to indicate the vendored Chart.js is currently being loaded dynamically.
+ * @type {boolean}
+ */
 let __chartVendorLoading = false;
-// Whether we've attempted a global Chart.destroy() sweep already
+/**
+ * Whether we've attempted a global {@link destroyAllCharts} sweep already.
+ * @type {boolean}
+ */
 let __didGlobalChartDestroy = false;
-// Flags to indicate initial data fetch completion
+/**
+ * Flag to indicate the initial weather fetch has completed (readiness gating).
+ * @type {boolean}
+ */
 let __weatherFetched = false;
+/**
+ * Flag to indicate the initial status fetch has completed (readiness gating).
+ * @type {boolean}
+ */
 let __statusFetched = false;
 // Public readiness flag for tests to wait on
 window.__dashboardReady = window.__dashboardReady || false;
 
+/**
+ * Set `window.__dashboardReady` once the dashboard is usable, so tests can wait on it.
+ *
+ * Requires charts initialized, the first weather and status fetches done, and the
+ * temperature chart holding at least 2 points. If inspecting the chart throws,
+ * falls back to the first three conditions only. Never throws.
+ * @returns {void}
+ */
 function trySetDashboardReady() {
     try {
             if (window.__dashboardReady) return;
@@ -171,6 +363,14 @@ function trySetDashboardReady() {
     }
 }
 
+/**
+ * Destroy every Chart.js instance on the page and empty {@link charts}.
+ *
+ * Used once as recovery when `initCharts` fails with "Canvas is already in use".
+ * Walks `Chart.instances`, then `Chart.getChart()` on each known canvas id. Sets
+ * {@link __didGlobalChartDestroy}. No-op when Chart.js is not loaded; never throws.
+ * @returns {void}
+ */
 function destroyAllCharts() {
     try {
         if (typeof Chart === 'undefined') return;
@@ -213,6 +413,14 @@ function destroyAllCharts() {
         debugLog(logLevels.WARN, 'destroyAllCharts encountered an error', e);
     }
 }
+/**
+ * Ensure a given dataset index exists on a chart, creating minimal `{data: []}`
+ * placeholder datasets up to and including `index` if missing.
+ *
+ * @param {?Object} chart Chart.js instance (ignored if falsy or without `data`).
+ * @param {number} index Dataset index that must exist afterwards.
+ * @returns {void}
+ */
 function ensureDataset(chart, index) {
     if (!chart || !chart.data) return;
     if (!chart.data.datasets) chart.data.datasets = [];
@@ -224,6 +432,23 @@ function ensureDataset(chart, index) {
     }
 }
 
+/**
+ * Create all dashboard charts, or the single chart on the popout page.
+ *
+ * Destroys any Chart.js instances already bound to the known canvases first to
+ * avoid "Canvas is already in use" errors on re-initialization. On the popout page
+ * (a `#chart-canvas` element exists) it reads the `config` query parameter (theme,
+ * units, datasets), builds one chart for the type named by the last URL path
+ * segment, wires the time-range select and CSV/JSON export buttons, stores it as
+ * `charts.popout` / `charts.popoutType`, and returns. Otherwise it creates the
+ * seven dashboard charts (skipping any already present in {@link charts}), attaches
+ * click-to-popout handlers, applies {@link forceChartColors} and adds a resize
+ * handler for the rain chart axis labels.
+ *
+ * @returns {void}
+ * @throws {ReferenceError} If Chart.js (`Chart`) is not loaded.
+ * @throws {TypeError} On the dashboard page if a required chart canvas is missing.
+ */
 function initCharts() {
     debugLog(logLevels.DEBUG, 'Initializing all charts with configuration');
     
@@ -449,10 +674,21 @@ function initCharts() {
                             cornerRadius: 8,
                             displayColors: true,
                             callbacks: {
+                                /**
+                                 * Popout tooltip title: the hovered point's date and 24-hour time.
+                                 * @param {Array<Object>} context Chart.js tooltip items; the first item's `parsed.x` is used.
+                                 * @returns {string} E.g. `"Oct 16, 14:05"`.
+                                 */
                                 title: function(context) {
                                     const date = new Date(context[0].parsed.x);
                                     return date.toLocaleDateString('en-US', { month: 'short', day: '2-digit' }) + ', ' + date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
                                 },
+                                /**
+                                 * Popout tooltip line: dataset label, value and unit. Rain values get 3 decimals and
+                                 * an in/hr, mm/hr, in or mm unit depending on the dataset; others get 1 decimal.
+                                 * @param {Object} context Chart.js tooltip item.
+                                 * @returns {string} E.g. `"Accumulation: 0.120 in"`.
+                                 */
                                 label: function(context) {
                                     let value = context.parsed.y;
                                     let label = context.dataset.label || '';
@@ -497,6 +733,11 @@ function initCharts() {
                                 color: '#333', 
                                 font: { size: 14, weight: '500' },
                                 padding: 8,
+                                /**
+                                 * Popout x-axis tick label: 24-hour `HH:mm` time.
+                                 * @param {number} value Tick value (epoch milliseconds).
+                                 * @returns {string}
+                                 */
                                 callback: function(value){ 
                                     return new Date(value).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false }); 
                                 } 
@@ -518,6 +759,11 @@ function initCharts() {
                                 color: chartType === 'rain' ? '#3b82f6' : '#333', 
                                 font: { size: 14, weight: '500' },
                                 padding: 8,
+                                /**
+                                 * Popout y-axis tick label: 3 decimals for rain charts, 1 decimal otherwise.
+                                 * @param {number} value Tick value.
+                                 * @returns {string}
+                                 */
                                 callback: function(value){ 
                                     // For rain charts, show more decimal places for small values
                                     if (chartType === 'rain') {
@@ -546,6 +792,11 @@ function initCharts() {
                                 color: '#8b5cf6',
                                 font: { size: 14, weight: '500' },
                                 padding: 8,
+                                /**
+                                 * Popout rain accumulation (right axis) tick label with 3 decimals.
+                                 * @param {number} value Tick value.
+                                 * @returns {string}
+                                 */
                                 callback: function(value) {
                                     return value.toFixed(3);
                                 }
@@ -639,9 +890,14 @@ function initCharts() {
     }
 
     /**
-     * Filter chart data by time range (for popout charts)
-     * @param {Chart} chart - The Chart.js instance
-     * @param {number} hours - Number of hours to show (0 = all data)
+     * Filter chart data by time range (for popout charts) by setting the x-axis
+     * min/max, then stretch the two-point horizontal reference lines to the new range.
+     *
+     * The data itself is not removed; only the visible window changes.
+     *
+     * @param {Chart} chart The Chart.js instance; ignored if it has no x scale options.
+     * @param {number} hours Number of hours to show, ending now (0 = all data).
+     * @returns {void}
      */
     function filterChartDataByTime(chart, hours) {
         if (!chart || !chart.options || !chart.options.scales || !chart.options.scales.x) {
@@ -702,10 +958,14 @@ function initCharts() {
     }
 
     /**
-     * Export chart data in CSV or JSON format
-     * @param {Chart} chart - The Chart.js instance
-     * @param {string} chartType - Type of chart (temperature, rain, etc.)
-     * @param {string} format - Export format ('csv' or 'json')
+     * Export chart data in CSV or JSON format, as a browser download named
+     * `tempest-<chartType>-<timestamp>.<format>`. Shows an alert when there is no data.
+     * Any other `format` value does nothing.
+     *
+     * @param {Chart} chart The Chart.js instance.
+     * @param {string} chartType Type of chart (temperature, rain, etc.), used in the filename.
+     * @param {string} format Export format (`'csv'` or `'json'`).
+     * @returns {void}
      */
     function exportChartData(chart, chartType, format) {
         if (!chart || !chart.data || !chart.data.datasets || chart.data.datasets.length === 0) {
@@ -724,7 +984,12 @@ function initCharts() {
     }
 
     /**
-     * Export chart data as CSV
+     * Export chart data as CSV: a `Timestamp` column (ISO 8601) plus one column per
+     * dataset, one row per distinct x value across all datasets.
+     *
+     * @param {Chart} chart The Chart.js instance.
+     * @param {string} filename Download file name.
+     * @returns {void}
      */
     function exportAsCSV(chart, filename) {
         let csv = 'Timestamp,';
@@ -766,7 +1031,12 @@ function initCharts() {
     }
 
     /**
-     * Export chart data as JSON
+     * Export chart data as pretty-printed JSON with the chart type, export time, and
+     * each dataset's label, colours and `{timestamp, value}` points.
+     *
+     * @param {Chart} chart The Chart.js instance.
+     * @param {string} filename Download file name.
+     * @returns {void}
      */
     function exportAsJSON(chart, filename) {
         const exportData = {
@@ -788,7 +1058,12 @@ function initCharts() {
     }
 
     /**
-     * Trigger file download in browser
+     * Trigger a file download in the browser via a temporary Blob URL and `<a download>` click.
+     *
+     * @param {string} content File contents.
+     * @param {string} filename Suggested file name.
+     * @param {string} mimeType MIME type of the Blob.
+     * @returns {void}
      */
     function downloadFile(content, filename, mimeType) {
         const blob = new Blob([content], { type: mimeType });
@@ -826,6 +1101,11 @@ function initCharts() {
                     padding: 8,
                     cornerRadius: 6,
                     callbacks: {
+                        /**
+                         * Dashboard tooltip title: the hovered point's date and 24-hour time.
+                         * @param {Array<Object>} context Chart.js tooltip items; the first item's `parsed.x` is used.
+                         * @returns {string}
+                         */
                         title: function(context) {
                             const date = new Date(context[0].parsed.x);
                             return date.toLocaleDateString('en-US', { month: 'short', day: '2-digit' }) + ', ' + date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -842,12 +1122,18 @@ function initCharts() {
                         tooltipFormat: 'MMM dd, HH:mm'
                     },
                     grid: { display: true, color: 'rgba(0,0,0,0.06)' },
+                    /**
+                     * The x-axis tick `callback` on the next line formats the tick (epoch ms) as 24-hour `HH:mm`.
+                     */
                     ticks: { maxTicksLimit: 6, color: '#666', font: { size: 11 }, callback: function(value){ return new Date(value).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false }); } },
                     title: { display: false }
                 },
                 y: {
                     display: true,
                     grid: { display: true, color: 'rgba(0,0,0,0.06)' },
+                    /**
+                     * The y-axis tick `callback` on the next line formats the value with 1 decimal.
+                     */
                     ticks: { maxTicksLimit: 5, color: '#444', font: { size: 12 }, callback: function(value){ return value.toFixed(1); } },
                     title: { display: true, text: 'Value', color: '#444', font: { size: 12, weight: '600' } }
                 }
@@ -1079,6 +1365,11 @@ function initCharts() {
                         font: { size: 8 },
                         padding: 2,
                         maxTicksLimit: 4,
+                        /**
+                         * Rain intensity (left axis) tick label with 2 decimals.
+                         * @param {number} value Tick value.
+                         * @returns {string}
+                         */
                         callback: function(value) {
                             return value.toFixed(2);
                         }
@@ -1105,6 +1396,11 @@ function initCharts() {
                         font: { size: 8 },
                         padding: 2,
                         maxTicksLimit: 4,
+                        /**
+                         * Rain accumulation (right axis) tick label with 2 decimals.
+                         * @param {number} value Tick value.
+                         * @returns {string}
+                         */
                         callback: function(value) {
                             return value.toFixed(2);
                         }
@@ -1116,6 +1412,12 @@ function initCharts() {
                 tooltip: {
                     ...chartConfig.options.plugins.tooltip,
                     callbacks: {
+                        /**
+                         * Rain chart tooltip line: dataset 0 is shown as intensity (in/hr or mm/hr),
+                         * every other dataset as an amount (in or mm), each with 3 decimals.
+                         * @param {Object} context Chart.js tooltip item.
+                         * @returns {string}
+                         */
                         label: function(context) {
                             let label = context.dataset.label || '';
                             if (label) {
@@ -1305,6 +1607,17 @@ function initCharts() {
     });
 }
 
+/**
+ * Force the complementary colour pairs onto each dashboard chart's secondary datasets.
+ *
+ * Creates any missing secondary datasets via {@link ensureDataset} first:
+ * temperature (red data, green average), humidity (blue, orange average), wind
+ * (teal, bright red average, width 3), rain (datasets 1-3: yellow-green, orange
+ * 24h total, cyan window total) and pressure (orange, blue average). Light and UV
+ * have no average line. Also attaches the UV chart's click-to-popout handler when
+ * the wind chart exists.
+ * @returns {void}
+ */
 function forceChartColors() {
     debugLog(logLevels.INFO, '🎨 Forcing chart colors to complementary pairs');
     
@@ -1346,7 +1659,22 @@ function forceChartColors() {
         }
     }
 
-    // helper to open popout chart page with encoded configuration
+    /**
+     * Helper to open the popout chart page with an encoded configuration.
+     *
+     * Builds a compact per-dataset metadata payload (colours, dashes, widths, fill,
+     * plus a `role` hint of average/trend/total from the label) so the popout can
+     * mirror the small-card chart visuals, adds an `incomingUnits` hint (from
+     * `statusData.unitHints`, `weatherData.unitHints`, or a copy of {@link units}) and
+     * the saved theme, then opens `/chart/<type>?config=<json>` in a new tab. Errors
+     * are logged, not thrown.
+     *
+     * @param {string} type Chart key in {@link charts}.
+     * @param {string} field Observation field name passed through in the config.
+     * @param {string} title Title passed through in the config.
+     * @param {string} color Main line colour passed through in the config.
+     * @returns {void}
+     */
     function openChartPopout(type, field, title, color) {
         try {
             // Build a compact per-dataset metadata payload so the popout can mirror
@@ -1434,6 +1762,11 @@ function forceChartColors() {
     debugLog(logLevels.INFO, '✅ Chart colors forced - complementary pairs applied');
 }
 
+/**
+ * Show the station elevation in `#tempest-elevation`: feet when the temperature
+ * unit is Fahrenheit, metres otherwise, or `--` when unknown.
+ * @returns {void}
+ */
 function updateElevationDisplay() {
     const tempestElevation = document.getElementById('tempest-elevation');
     
@@ -1452,6 +1785,14 @@ function updateElevationDisplay() {
     }
 }
 
+/**
+ * Refresh the unit labels next to the readings, then the elevation and chart axis labels.
+ *
+ * Uses {@link prettyUnitLabel} for consistency with popout formatting. The rain and
+ * pressure unit elements are rebuilt via `innerHTML` to keep their info icon, so
+ * the icon's click listener is re-attached.
+ * @returns {void}
+ */
 function updateUnits() {
     // Use prettyUnitLabel to ensure consistency with popout formatting
     const tempEl = document.getElementById('temperature-unit');
@@ -1520,6 +1861,16 @@ function updateUnits() {
     updateChartLabels();
 }
 
+/**
+ * Toggle one sensor's display unit, persist it, and re-render everything that shows it.
+ *
+ * Calls {@link updateUnits}, {@link updateDisplay}, {@link refreshForecastDisplay}
+ * and {@link recalculateAverages} in that order.
+ *
+ * @param {string} sensor `'temperature'`, `'wind'`, `'rain'` or `'pressure'`; anything else
+ *   only triggers the re-render.
+ * @returns {void}
+ */
 function toggleUnit(sensor) {
     console.log('🚀 toggleUnit() called with sensor:', sensor);
     const oldUnit = units[sensor];
@@ -1567,6 +1918,11 @@ function toggleUnit(sensor) {
     console.log('🔄 toggleUnit() - All functions completed');
 }
 
+/**
+ * Set every dashboard chart's y-axis title to the current units and redraw all charts
+ * without animation.
+ * @returns {void}
+ */
 function updateChartLabels() {
     // Update temperature chart Y-axis label
     if (charts.temperature && charts.temperature.options && charts.temperature.options.scales && charts.temperature.options.scales.y) {
@@ -1660,12 +2016,22 @@ function updateChartLabels() {
     debugLog(logLevels.DEBUG, 'Chart labels updated with new units', units);
 }
 
+/**
+ * Convert a bearing to one of 16 compass points.
+ * @param {number} degrees Wind direction in degrees (0 = north).
+ * @returns {string} E.g. `'NNE'`.
+ */
 function degreesToDirection(degrees) {
     const directions = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
     const index = Math.round(degrees / 22.5) % 16;
     return directions[index];
 }
 
+/**
+ * Map a compass point to an arrow glyph (8 directions).
+ * @param {string} direction Compass point from {@link degreesToDirection}.
+ * @returns {string} The arrow character; `'↑'` for unknown input.
+ */
 function updateArrow(direction) {
     const arrows = {
         'N': '↑', 'NNE': '↗', 'NE': '↗', 'ENE': '↗',
@@ -1676,38 +2042,88 @@ function updateArrow(direction) {
     return arrows[direction] || '↑';
 }
 
+/**
+ * Convert Celsius to Fahrenheit.
+ * @param {number} celsius Temperature in °C.
+ * @returns {number} Temperature in °F.
+ */
 function celsiusToFahrenheit(celsius) {
     return (celsius * 9/5) + 32;
 }
 
+/**
+ * Convert Fahrenheit to Celsius.
+ * @param {number} fahrenheit Temperature in °F.
+ * @returns {number} Temperature in °C.
+ */
 function fahrenheitToCelsius(fahrenheit) {
     return (fahrenheit - 32) * 5/9;
 }
 
+/**
+ * Convert miles per hour to kilometres per hour.
+ * @param {number} mph Speed in miles per hour.
+ * @returns {number} Speed in km/h.
+ */
 function mphToKph(mph) {
     return mph * 1.60934;
 }
 
+/**
+ * Convert kilometres per hour to miles per hour.
+ * @param {number} kph Speed in km/h.
+ * @returns {number} Speed in miles per hour.
+ */
 function kphToMph(kph) {
     return kph / 1.60934;
 }
 
+/**
+ * Convert inches to millimetres.
+ * @param {number} inches Length in inches.
+ * @returns {number} Length in millimetres.
+ */
 function inchesToMm(inches) {
     return inches * 25.4;
 }
 
+/**
+ * Convert millimetres to inches.
+ * @param {number} mm Length in millimetres.
+ * @returns {number} Length in inches.
+ */
 function mmToInches(mm) {
     return mm / 25.4;
 }
 
+/**
+ * Convert millibars to inches of mercury.
+ * @param {number} mb Pressure in millibars.
+ * @returns {number} Pressure in inches of mercury.
+ */
 function mbToInHg(mb) {
     return mb * 0.02953;
 }
 
+/**
+ * Convert inches of mercury to millibars.
+ * @param {number} inHg Pressure in inches of mercury.
+ * @returns {number} Pressure in millibars.
+ */
 function inHgToMb(inHg) {
     return inHg / 0.02953;
 }
 
+/**
+ * Heat index ("feels like" in heat) using the NOAA Rothfusz regression.
+ *
+ * Below 80 °F or 40 % relative humidity the formula does not apply and the
+ * input temperature is returned unchanged.
+ *
+ * @param {number} tempC Air temperature in °C.
+ * @param {number} humidity Relative humidity in percent.
+ * @returns {number} Heat index in °C.
+ */
 function calculateHeatIndex(tempC, humidity) {
     // Convert temperature to Fahrenheit for calculation
     const tempF = (tempC * 9/5) + 32;
@@ -1746,6 +2162,11 @@ function calculateHeatIndex(tempC, humidity) {
     return heatIndexC;
 }
 
+/**
+ * Describe a Tempest precipitation type code.
+ * @param {number} precipType 0 none, 1 rain, 2 hail, 3 rain + hail.
+ * @returns {string} `'None'`, `'Rain'`, `'Hail'`, `'Rain + Hail'` or `'Unknown'`.
+ */
 function getPrecipitationTypeDescription(precipType) {
     switch (precipType) {
         case 0: return 'None';
@@ -1756,14 +2177,29 @@ function getPrecipitationTypeDescription(precipType) {
     }
 }
 
+/**
+ * Convert kilometres to miles.
+ * @param {number} km Distance in kilometres.
+ * @returns {number} Distance in miles.
+ */
 function kmToMiles(km) {
     return km / 1.60934;
 }
 
+/**
+ * Convert miles to kilometres.
+ * @param {number} miles Distance in miles.
+ * @returns {number} Distance in kilometres.
+ */
 function milesToKm(miles) {
     return miles * 1.60934;
 }
 
+/**
+ * Mean of the `y` values of a series.
+ * @param {Array<ChartPoint>} data Chart points.
+ * @returns {number} The average, or 0 for an empty array.
+ */
 function calculateAverage(data) {
     if (data.length === 0) return 0;
     const sum = data.reduce((acc, point) => acc + point.y, 0);
@@ -1778,7 +2214,15 @@ function calculateAverage(data) {
     return average;
 }
 
-// Calculate linear regression trend line
+/**
+ * Calculate a linear regression trend line.
+ *
+ * Regresses `y` against the point index (not the timestamp), so uneven sampling
+ * is treated as evenly spaced; the original timestamps are kept for x.
+ *
+ * @param {Array<ChartPoint>} data Chart points in time order.
+ * @returns {Array<ChartPoint>} One fitted point per input point, or `[]` for fewer than 2 points.
+ */
 function calculateTrendLine(data) {
     if (!data || data.length < 2) return [];
     
@@ -1815,6 +2259,19 @@ function calculateTrendLine(data) {
     return trendLine;
 }
 
+/**
+ * Fill dataset 1 of a chart with its average line.
+ *
+ * Pressure, temperature, humidity and wind (matched by chart identity or by the
+ * dataset 0 label) get a single constant average across the full time range (a
+ * two-point horizontal line), as summary charts where a global average is more
+ * appropriate. Every other chart gets a centred moving average with a window of
+ * 10 % of the points, clamped to 5..50. Creates a placeholder dataset 1 if missing.
+ *
+ * @param {Object} chart Chart.js instance.
+ * @param {Array<ChartPoint>} data The main series (normally `chart.data.datasets[0].data`).
+ * @returns {void}
+ */
 function updateAverageLine(chart, data) {
     // Ensure the second dataset exists (used for moving average). Create a minimal
     // placeholder if it's missing so assignments below won't throw.
@@ -1910,6 +2367,20 @@ function updateAverageLine(chart, data) {
     });
 }
 
+/**
+ * Draw the "24-hour total" reference line (dataset 2) on the rain chart.
+ *
+ * For the rain chart only. A two-point horizontal line at the daily total
+ * spanning dataset 0's time range. With dual Y-axes Chart.js auto-scales each
+ * axis independently, so no manual scale adjustment is made. Clears the line
+ * when the total is missing or there is no main data.
+ *
+ * @param {Object} chart The rain Chart.js instance.
+ * @param {?number} rainDailyTotal Daily rain total in mm (the API unit).
+ * @param {Units} units Display units (shadows the global); the total is converted to
+ *   inches when `units.rain === 'inches'`.
+ * @returns {void}
+ */
 function update24HourAccumulationLine(chart, rainDailyTotal, units) {
     // For rain chart only - updates the third dataset (index 2) with 24-hour accumulation
     debugLog(logLevels.INFO, 'Updating 24h Rain Line', {
@@ -1975,8 +2446,16 @@ function update24HourAccumulationLine(chart, rainDailyTotal, units) {
 }
 
 /**
- * Updates the accumulated rain line (dataset 3) in the rain chart
- * This shows cumulative rain over the chart's timeframe
+ * Updates the accumulated rain line (dataset 3) in the rain chart.
+ *
+ * This shows cumulative rain over the chart's timeframe: a running sum of
+ * dataset 0's `y` values. The incremental values are expected to be calculated
+ * by the server to handle decreases in rain_accumulated (from historical data
+ * issues or midnight resets), so they are simply summed to get the window total.
+ * Does nothing unless datasets 0 and 3 both exist.
+ *
+ * @param {Object} chart The rain Chart.js instance.
+ * @returns {void}
  */
 function updateAccumulatedRainLine(chart) {
     if (!chart || !chart.data || !chart.data.datasets[0] || !chart.data.datasets[3]) {
@@ -2007,7 +2486,15 @@ function updateAccumulatedRainLine(chart) {
     });
 }
 
-// Temporary test function to simulate the rain issue (for debugging)
+/**
+ * Temporary test function to simulate the rain issue (for debugging).
+ *
+ * Sets `weatherData.rainDailyTotal` to 6.724, redraws the 24-hour line and the
+ * `#daily-rain-total` text, then restores the original value after 10 seconds.
+ * Exposed as `window.testRainChartScaling`. Does nothing until the rain chart and
+ * weather data exist.
+ * @returns {void}
+ */
 function testRainChartScaling() {
     if (charts.rain && weatherData) {
         // Simulate the scenario: rain data near 0.0 but daily total is 6.724
@@ -2063,6 +2550,16 @@ function testRainChartScaling() {
 // Make test function available globally
 window.testRainChartScaling = testRainChartScaling;
 
+/**
+ * Clean and sort a chart's main series in place.
+ *
+ * Drops points whose `y` is not a number (or is NaN) or whose `x` is not a valid
+ * Date, finite number or parseable date string, converts every `x` to a Date and
+ * sorts ascending. Duplicates are kept. Only dataset 0 is touched.
+ *
+ * @param {Object} chart Chart.js instance.
+ * @returns {void}
+ */
 function validateAndSortChartData(chart) {
     // Validate and sort data for the main dataset
     if (chart.data.datasets[0] && chart.data.datasets[0].data) {
@@ -2097,6 +2594,15 @@ function validateAndSortChartData(chart) {
     }
 }
 
+/**
+ * Fill dataset 2 of a chart with the linear-regression trend line of `data`
+ * (see {@link calculateTrendLine}); clears it for fewer than 2 points. Does nothing
+ * to the chart if dataset 2 does not exist.
+ *
+ * @param {Object} chart Chart.js instance (used for the pressure chart).
+ * @param {Array<ChartPoint>} data The main series.
+ * @returns {void}
+ */
 function updateTrendLine(chart, data) {
     if (data.length < 2) {
         // Clear trend line if insufficient data
@@ -2121,6 +2627,11 @@ function updateTrendLine(chart, data) {
     });
 }
 
+/**
+ * Describe an illuminance level with a familiar real-world comparison.
+ * @param {number} lux Illuminance in lux.
+ * @returns {string} E.g. `"Office lighting"`, `"Direct sunlight"`.
+ */
 function getLuxDescription(lux) {
     let description;
     if (lux <= 0.0001) description = "Moonless, overcast night sky (starlight)";
@@ -2147,6 +2658,11 @@ function getLuxDescription(lux) {
     return description;
 }
 
+/**
+ * Describe a relative humidity level in comfort terms.
+ * @param {number} humidity Relative humidity in percent.
+ * @returns {string}
+ */
 function getHumidityDescription(humidity) {
     let description;
     if (humidity <= 30) description = "Very dry - may cause discomfort";
@@ -2164,6 +2680,12 @@ function getHumidityDescription(humidity) {
     return description;
 }
 
+/**
+ * Convert accumulated rainfall to a descriptive category (with emoji), based on
+ * standard meteorological classifications and colourful descriptions.
+ * @param {number} rainAccumMm Rain amount in millimetres.
+ * @returns {string} E.g. `"Light - Soft drizzle 🌦️"`.
+ */
 function getRainDescription(rainAccumMm) {
     // Convert accumulated rainfall to descriptive categories
     // Based on standard meteorological classifications and colorful descriptions
@@ -2187,6 +2709,11 @@ function getRainDescription(rainAccumMm) {
     return description;
 }
 
+/**
+ * Describe a UV index using the standard UV index risk bands (low/moderate/high/very high/extreme).
+ * @param {number} uvIndex UV index.
+ * @returns {string}
+ */
 function getUVDescription(uvIndex) {
     let description;
     if (uvIndex <= 2) description = "Low - Low danger from the sun's UV rays";
@@ -2203,6 +2730,12 @@ function getUVDescription(uvIndex) {
     return description;
 }
 
+/**
+ * Describe the weather typically associated with a barometric pressure.
+ * @param {number} pressure Pressure in the current display unit; converted to mb
+ *   first when {@link units}.pressure is `'inHg'`.
+ * @returns {string}
+ */
 function getPressureDescription(pressure) {
     // Convert to mb if needed
     let pressureMb = pressure;
@@ -2231,6 +2764,15 @@ function getPressureDescription(pressure) {
 
 // Lux tooltip helpers are implemented later; earlier duplicates removed to avoid redeclaration.
 
+/**
+ * Toggle the pressure info tooltip.
+ *
+ * Stops the click from bubbling up to the parent pressure-unit element, and moves
+ * the tooltip to `<body>` before showing it to escape the card's stacking context.
+ * @param {Event} [event] The click event.
+ * @returns {void}
+ * @throws {TypeError} If `#pressure-tooltip` is missing.
+ */
 function togglePressureTooltip(event) {
     // Stop the click from bubbling up to the parent pressure-unit element
     if (event) {
@@ -2247,11 +2789,22 @@ function togglePressureTooltip(event) {
     tooltip.classList.toggle('show');
 }
 
+/**
+ * Hide the pressure info tooltip.
+ * @returns {void}
+ * @throws {TypeError} If `#pressure-tooltip` is missing.
+ */
 function closePressureTooltip() {
     const tooltip = document.getElementById('pressure-tooltip');
     tooltip.classList.remove('show');
 }
 
+/**
+ * Document click handler that closes the pressure tooltip when the click lands
+ * outside both the tooltip and its info icon.
+ * @param {MouseEvent} event The click event.
+ * @returns {void}
+ */
 function handlePressureTooltipClickOutside(event) {
     const tooltip = document.getElementById('pressure-tooltip');
     const context = document.getElementById('pressure-context');
@@ -2266,6 +2819,12 @@ function handlePressureTooltipClickOutside(event) {
 }
 
 // Tooltip management functions
+/**
+ * Toggle the lux info tooltip, moving it to `<body>` before showing it to escape
+ * the card's stacking context.
+ * @returns {void}
+ * @throws {TypeError} If `#lux-tooltip` is missing.
+ */
 function toggleLuxTooltip() {
     const tooltip = document.getElementById('lux-tooltip');
     
@@ -2278,12 +2837,23 @@ function toggleLuxTooltip() {
     debugLog(logLevels.DEBUG, 'Lux tooltip toggled', { visible: tooltip.classList.contains('show') });
 }
 
+/**
+ * Hide the lux info tooltip.
+ * @returns {void}
+ * @throws {TypeError} If `#lux-tooltip` is missing.
+ */
 function closeLuxTooltip() {
     const tooltip = document.getElementById('lux-tooltip');
     tooltip.classList.remove('show');
     debugLog(logLevels.DEBUG, 'Lux tooltip closed');
 }
 
+/**
+ * Document click handler that closes the lux tooltip when the click lands outside
+ * both the tooltip and its info icon.
+ * @param {MouseEvent} event The click event.
+ * @returns {void}
+ */
 function handleLuxTooltipClickOutside(event) {
     const tooltip = document.getElementById('lux-tooltip');
     const infoIcon = document.getElementById('lux-info-icon');
@@ -2296,6 +2866,12 @@ function handleLuxTooltipClickOutside(event) {
 }
 
 // Rain tooltip functions
+/**
+ * Toggle the rain info tooltip, moving it to `<body>` before showing it to escape
+ * the card's stacking context. Logs an error and returns if the tooltip is missing.
+ * @param {Event} [event] The click event; its propagation is stopped.
+ * @returns {void}
+ */
 function toggleRainTooltip(event) {
     if (event) {
         event.stopPropagation();
@@ -2316,12 +2892,24 @@ function toggleRainTooltip(event) {
     debugLog(logLevels.DEBUG, 'Rain tooltip toggled', { visible: tooltip.classList.contains('show') });
 }
 
+/**
+ * Hide the rain info tooltip.
+ * @returns {void}
+ * @throws {TypeError} If `#rain-tooltip` is missing.
+ */
 function closeRainTooltip() {
     const tooltip = document.getElementById('rain-tooltip');
     tooltip.classList.remove('show');
     debugLog(logLevels.DEBUG, 'Rain tooltip closed');
 }
 
+/**
+ * Document click handler that closes the rain tooltip when the click lands outside
+ * both the tooltip and its info icon.
+ * @param {MouseEvent} event The click event.
+ * @returns {void}
+ * @throws {TypeError} If the tooltip is shown but `#rain-info-icon` is missing.
+ */
 function handleRainTooltipClickOutside(event) {
     const tooltip = document.getElementById('rain-tooltip');
     const infoIcon = document.getElementById('rain-info-icon');
@@ -2333,6 +2921,13 @@ function handleRainTooltipClickOutside(event) {
 }
 
 // Humidity tooltip functions
+/**
+ * Toggle the humidity info tooltip, moving it to `<body>` before showing it to
+ * escape the card's stacking context.
+ * @param {Event} [event] The click event; its propagation is stopped.
+ * @returns {void}
+ * @throws {TypeError} If `#humidity-tooltip` is missing.
+ */
 function toggleHumidityTooltip(event) {
     if (event) {
         event.stopPropagation();
@@ -2348,12 +2943,24 @@ function toggleHumidityTooltip(event) {
     debugLog(logLevels.DEBUG, 'Humidity tooltip toggled', { visible: tooltip.classList.contains('show') });
 }
 
+/**
+ * Hide the humidity info tooltip.
+ * @returns {void}
+ * @throws {TypeError} If `#humidity-tooltip` is missing.
+ */
 function closeHumidityTooltip() {
     const tooltip = document.getElementById('humidity-tooltip');
     tooltip.classList.remove('show');
     debugLog(logLevels.DEBUG, 'Humidity tooltip closed');
 }
 
+/**
+ * Document click handler that closes the humidity tooltip when the click lands
+ * outside both the tooltip and its info icon.
+ * @param {MouseEvent} event The click event.
+ * @returns {void}
+ * @throws {TypeError} If the tooltip is shown but `#humidity-info-icon` is missing.
+ */
 function handleHumidityTooltipClickOutside(event) {
     const tooltip = document.getElementById('humidity-tooltip');
     const infoIcon = document.getElementById('humidity-info-icon');
@@ -2364,6 +2971,12 @@ function handleHumidityTooltipClickOutside(event) {
     }
 }
 
+/**
+ * Toggle the heat index info tooltip, moving it to `<body>` before showing it to
+ * escape the card's stacking context.
+ * @returns {void}
+ * @throws {TypeError} If `#heat-index-tooltip` is missing.
+ */
 function toggleHeatIndexTooltip() {
     const tooltip = document.getElementById('heat-index-tooltip');
     
@@ -2376,12 +2989,23 @@ function toggleHeatIndexTooltip() {
     debugLog(logLevels.DEBUG, 'Heat index tooltip toggled', { visible: tooltip.classList.contains('show') });
 }
 
+/**
+ * Hide the heat index info tooltip.
+ * @returns {void}
+ * @throws {TypeError} If `#heat-index-tooltip` is missing.
+ */
 function closeHeatIndexTooltip() {
     const tooltip = document.getElementById('heat-index-tooltip');
     tooltip.classList.remove('show');
     debugLog(logLevels.DEBUG, 'Heat index tooltip closed');
 }
 
+/**
+ * Document click handler that closes the heat index tooltip when the click lands
+ * outside both the tooltip and its info icon.
+ * @param {MouseEvent} event The click event.
+ * @returns {void}
+ */
 function handleHeatIndexTooltipClickOutside(event) {
     const tooltip = document.getElementById('heat-index-tooltip');
     const infoIcon = document.getElementById('heat-index-info-icon');
@@ -2393,6 +3017,12 @@ function handleHeatIndexTooltipClickOutside(event) {
     }
 }
 
+/**
+ * Toggle the UV info tooltip, moving it to `<body>` before showing it to escape the
+ * card's stacking context.
+ * @returns {void}
+ * @throws {TypeError} If `#uv-tooltip` is missing.
+ */
 function toggleUVTooltip() {
     const tooltip = document.getElementById('uv-tooltip');
     
@@ -2405,12 +3035,23 @@ function toggleUVTooltip() {
     debugLog(logLevels.DEBUG, 'UV tooltip toggled', { visible: tooltip.classList.contains('show') });
 }
 
+/**
+ * Hide the UV info tooltip.
+ * @returns {void}
+ * @throws {TypeError} If `#uv-tooltip` is missing.
+ */
 function closeUVTooltip() {
     const tooltip = document.getElementById('uv-tooltip');
     tooltip.classList.remove('show');
     debugLog(logLevels.DEBUG, 'UV tooltip closed');
 }
 
+/**
+ * Document click handler that closes the UV tooltip when the click lands outside
+ * both the tooltip and its info icon.
+ * @param {MouseEvent} event The click event.
+ * @returns {void}
+ */
 function handleUVTooltipClickOutside(event) {
     const tooltip = document.getElementById('uv-tooltip');
     const infoIcon = document.getElementById('uv-info-icon');
@@ -2422,6 +3063,20 @@ function handleUVTooltipClickOutside(event) {
     }
 }
 
+/**
+ * Render the current {@link weatherData} into the dashboard cards.
+ *
+ * Covers temperature, humidity and heat index, wind (speed, gust text, direction
+ * and arrow), rain (incremental and daily total, description, precipitation type),
+ * lightning, pressure (value, server-provided condition/trend/forecast, sea-level
+ * pressure), light and UV, the last-update time, battery voltage and the
+ * observation count. Skipped on pages without `#temperature` (the chart popout)
+ * and when no weather data has been fetched yet.
+ * @returns {void}
+ * @throws {TypeError} If a required dashboard element or numeric field (e.g.
+ *   `humidity`, `windDirection`, `illuminance`) is missing; {@link fetchWeather}
+ *   catches this.
+ */
 function updateDisplay() {
     // If the page does not include the main dashboard elements (for example
     // the chart popout page which only includes a single canvas), skip the
@@ -2668,6 +3323,18 @@ function updateDisplay() {
     });
 }
 
+/**
+ * Append the latest {@link weatherData} reading (timestamped now) to every live chart.
+ *
+ * Converts each value to the display units, trims series to {@link maxDataPoints},
+ * and refreshes average lines (all charts), the pressure trend line and the rain
+ * accumulation series, which is integrated from the rain rate and then offset so
+ * its last point equals the API's `rainDailyTotal`. On the popout page it updates
+ * `charts.popout` instead, including the average line, the pressure trend, and for
+ * rain a window accumulation plus a midnight-aware "today total" step line. Each
+ * chart's `update()` is wrapped in try/catch.
+ * @returns {void}
+ */
 function updateCharts() {
     console.log('🚀 DEBUG: updateCharts() called', { weatherData: weatherData });
     
@@ -2905,7 +3572,11 @@ function updateCharts() {
                 // per-point "today total" (step) so previous days are shown as a flat
                 // total and the current day increases from midnight to now.
                 if (mainData.length > 0) {
-                    // Helper: local date key (YYYY-MM-DD) for grouping by day
+                    /**
+                     * Helper: local date key (YYYY-MM-DD) for grouping rain by calendar day.
+                     * @param {Date|number} ts Timestamp.
+                     * @returns {string}
+                     */
                     const localDateKey = ts => {
                         const d = new Date(ts);
                         const y = d.getFullYear();
@@ -3009,6 +3680,18 @@ function updateCharts() {
     debugLog(logLevels.INFO, 'All charts updated successfully');
 }
 
+/**
+ * Convert the stored series of the one sensor whose unit just changed, then refresh
+ * its derived lines.
+ *
+ * Only the sensor that actually changed units is converted, which prevents
+ * double-conversion. Also rewrites the pressure condition/trend/forecast text and
+ * the `#daily-rain-total` text, and always resets the wind chart's axis title.
+ *
+ * @param {string} changedSensor `'temperature'`, `'wind'`, `'rain'` or `'pressure'`.
+ * @returns {void}
+ * @throws {TypeError} If the matching chart has not been created yet.
+ */
 function recalculateAverages(changedSensor) {
     // Only recalculate data for the sensor that actually changed units
     // This prevents double-conversion issues
@@ -3115,6 +3798,11 @@ function recalculateAverages(changedSensor) {
 }
 
 // Unit conversion functions
+/**
+ * Format a temperature for display in the current unit, with 1 decimal and the unit symbol.
+ * @param {number} celsius Temperature in °C.
+ * @returns {string} E.g. `"21.4°C"` or `"70.5°F"`.
+ */
 function formatTemperature(celsius) {
     if (units.temperature === 'fahrenheit') {
         return `${(celsius * 9/5 + 32).toFixed(1)}°F`;
@@ -3122,6 +3810,11 @@ function formatTemperature(celsius) {
     return `${celsius.toFixed(1)}°C`;
 }
 
+/**
+ * Format a pressure for display: inHg with 3 decimals or mb with 1 decimal.
+ * @param {number} mb Pressure in millibars.
+ * @returns {string}
+ */
 function formatPressure(mb) {
     if (units.pressure === 'inHg') {
         return `${(mb * 0.02953).toFixed(3)} inHg`;
@@ -3129,6 +3822,14 @@ function formatPressure(mb) {
     return `${mb.toFixed(1)} mb`;
 }
 
+/**
+ * Format a wind speed for display, treating the input as metres per second.
+ *
+ * Converts to mph or km/h when {@link units}.wind is `'mph'` or `'kmh'`; any other
+ * value (including `'kph'`, which {@link toggleUnit} sets) shows m/s.
+ * @param {number} mps Wind speed in m/s.
+ * @returns {string}
+ */
 function formatWindSpeed(mps) {
     if (units.wind === 'mph') {
         return `${(mps * 2.23694).toFixed(1)} mph`;
@@ -3138,6 +3839,11 @@ function formatWindSpeed(mps) {
     return `${mps.toFixed(1)} m/s`;
 }
 
+/**
+ * Format a rain amount: inches with 2 decimals or mm with 1 decimal.
+ * @param {number} mm Rain amount in millimetres.
+ * @returns {string}
+ */
 function formatRain(mm) {
     if (units.rain === 'inches') {
         return `${(mm * 0.0393701).toFixed(2)} in`;
@@ -3145,6 +3851,11 @@ function formatRain(mm) {
     return `${mm.toFixed(1)} mm`;
 }
 
+/**
+ * Format a rain rate: in/hr with 2 decimals or mm/hr with 1 decimal.
+ * @param {number} mmPerHour Rain rate in mm/hr.
+ * @returns {string}
+ */
 function formatRainRate(mmPerHour) {
     if (units.rain === 'inches') {
         return `${(mmPerHour * 0.0393701).toFixed(2)} in/hr`;
@@ -3152,6 +3863,17 @@ function formatRainRate(mmPerHour) {
     return `${mmPerHour.toFixed(1)} mm/hr`;
 }
 
+/**
+ * Fetch `/api/weather`, store it in {@link weatherData}, and refresh the display and charts.
+ *
+ * {@link updateDisplay} and {@link updateCharts} are each guarded so a single UI
+ * error does not abort the pipeline. On success the header status shows
+ * "Connected", the initial-fetch flag is set and readiness is re-checked. On any
+ * failure (network, non-2xx, bad JSON) the error is logged and the header shows
+ * "Waiting for UDP stream" in UDP mode or "Disconnected" otherwise; nothing is thrown.
+ * @async
+ * @returns {Promise<void>}
+ */
 async function fetchWeather() {
     const startTime = performance.now();
     debugLog(logLevels.DEBUG, 'Starting weather API call');
@@ -3246,7 +3968,16 @@ async function fetchWeather() {
     }
 }
 
-// Load historical data for popout chart pages
+/**
+ * Load historical data for the popout chart page from `/api/history`.
+ *
+ * Appends each observation (converted to display units) to the popout's main
+ * dataset, then computes the average line, the pressure trend, or for rain the
+ * window accumulation and the midnight-aware "today total" step line. Errors are
+ * logged, not thrown.
+ * @async
+ * @returns {Promise<void>}
+ */
 async function loadHistoricalDataForPopout() {
     if (!charts.popout || !charts.popoutType) {
         debugLog(logLevels.WARN, 'Cannot load historical data - popout chart not initialized');
@@ -3358,6 +4089,11 @@ async function loadHistoricalDataForPopout() {
             if (chartType === 'rain') {
                 // Build midnight-aware accumulated line and per-point today-total step.
                 if (mainData.length > 0) {
+                    /**
+                     * Local date key (YYYY-MM-DD) for grouping rain by calendar day.
+                     * @param {Date|number} ts Timestamp.
+                     * @returns {string}
+                     */
                     const localDateKey = ts => {
                         const d = new Date(ts);
                         const y = d.getFullYear();
@@ -3466,6 +4202,15 @@ async function loadHistoricalDataForPopout() {
     }
 }
 
+/**
+ * Fetch `/api/status` and render the station, forecast and HomeKit sections.
+ *
+ * Exposes the raw JSON as `window.__lastStatusRaw` for headless tests, records the
+ * data source type in {@link currentDataSourceType}, and marks the initial status
+ * fetch complete for readiness gating. Errors are logged, not thrown.
+ * @async
+ * @returns {Promise<void>}
+ */
 async function fetchStatus() {
     const startTime = performance.now();
     const responseTime = (performance.now() - startTime).toFixed(2);
@@ -3509,6 +4254,20 @@ async function fetchStatus() {
     }
 }
 
+/**
+ * Render a `/api/status` payload into the Tempest station and HomeKit cards.
+ *
+ * Stores it in {@link statusData}. Shows history-loading progress, the connection
+ * state (generated, waiting for UDP, connected/disconnected), the station name (a
+ * regenerate link in generated-weather mode), the station URL or UDP packet
+ * count/IP, elevation, last update, uptime, battery and observation counts. Also
+ * feeds `status.dataHistory` to {@link populateChartsWithHistoricalData} and calls
+ * {@link updateDetailedStationStatus} and {@link updateHomekitStatus}. Skipped on
+ * chart-only popout pages.
+ *
+ * @param {Object} status Parsed `/api/status` response.
+ * @returns {void}
+ */
 function updateStatusDisplay(status) {
     debugLog(logLevels.DEBUG, 'Updating status display', status);
     debugLog(logLevels.DEBUG, '🔍 STATUS DEBUG - Full status object:', JSON.stringify(status, null, 2));
@@ -3711,7 +4470,15 @@ function updateStatusDisplay(status) {
 
 /**
  * Updates the data source display based on the unified data source status.
- * Shows all active data sources (observations, forecast, web-status, etc.)
+ *
+ * Shows all active data sources as a comma-separated list: the observation
+ * source (UDP Stream, Generated, Custom URL, WeatherFlow API), API forecast/history
+ * use, and web-status scraping (or its API fallback). Falls back to "Generated"
+ * or "API" when nothing is detected.
+ *
+ * @param {Object} status Parsed `/api/status` response.
+ * @param {?HTMLElement} dataSourceElement Target element; nothing happens if it is null.
+ * @returns {void}
  */
 function updateDataSourceDisplay(status, dataSourceElement) {
     if (!dataSourceElement) return;
@@ -3793,6 +4560,15 @@ function updateDataSourceDisplay(status, dataSourceElement) {
     debugLog(logLevels.DEBUG, '📡 Data Sources:', sources.join(', '));
 }
 
+/**
+ * Fill the detailed device, hub and data-source rows of the Tempest card.
+ *
+ * When `status.stationStatus.batteryVoltage` is present, copies the device and hub
+ * fields (uptime, network, signal with bars, serial, firmware, sensor and battery
+ * status) and updates the battery indicator; otherwise every field shows `--`.
+ * @param {Object} status Parsed `/api/status` response.
+ * @returns {void}
+ */
 function updateDetailedStationStatus(status) {
     debugLog(logLevels.DEBUG, 'updateDetailedStationStatus called', status);
     
@@ -3881,6 +4657,14 @@ function updateDetailedStationStatus(status) {
     }
 }
 
+/**
+ * Show or hide the forecast card and render `status.forecast`.
+ *
+ * Caches the forecast in {@link forecastData} for later unit changes, then renders
+ * the current conditions and the daily forecast when present.
+ * @param {Object} status Parsed `/api/status` response.
+ * @returns {void}
+ */
 function updateForecastDisplay(status) {
     debugLog(logLevels.DEBUG, 'Updating forecast display', status.forecast);
 
@@ -3924,6 +4708,12 @@ function updateForecastDisplay(status) {
     }
 }
 
+/**
+ * Refresh the forecast display with the current units (called when units are
+ * toggled), using the cached {@link forecastData}. No-op before the first forecast.
+ * @returns {void}
+ * @throws {TypeError} If the cached forecast lacks `current_conditions` or `forecast.daily`.
+ */
 function refreshForecastDisplay() {
     // Refresh forecast display with current units (called when units are toggled)
     if (!forecastData) {
@@ -3940,6 +4730,14 @@ function refreshForecastDisplay() {
     updateDailyForecast(forecastData.forecast.daily);
 }
 
+/**
+ * Render the forecast's current conditions block.
+ *
+ * Temperatures (°C from the API) and sea-level pressure (mb) are converted to the
+ * display units; wind is always labelled mph.
+ * @param {Object} current `forecast.current_conditions` from the WeatherFlow forecast.
+ * @returns {void}
+ */
 function updateCurrentConditions(current) {
     debugLog(logLevels.DEBUG, 'Updating current conditions with data:', current);
     
@@ -3990,6 +4788,15 @@ function updateCurrentConditions(current) {
     if (elements.precip) elements.precip.textContent = `${current.precip_probability}%`;
 }
 
+/**
+ * Render up to 5 daily forecast tiles into `#forecast-daily-container`.
+ *
+ * Day 0 is labelled "Today". If a day's timestamp is within an hour of day 0's,
+ * the date is computed from today instead. Missing high/low temperatures are
+ * estimated as `air_temperature` ± 3 °C.
+ * @param {Array<Object>} dailyForecast `forecast.forecast.daily` entries.
+ * @returns {void}
+ */
 function updateDailyForecast(dailyForecast) {
     const container = document.getElementById('forecast-daily-container');
     if (!container || !dailyForecast) return;
@@ -4083,6 +4890,11 @@ function updateDailyForecast(dailyForecast) {
     }
 }
 
+/**
+ * Map a WeatherFlow forecast icon code to an emoji.
+ * @param {string} iconCode E.g. `'clear-day'`, `'rain'`.
+ * @returns {string} The emoji; `'🌤️'` for unknown codes.
+ */
 function getWeatherIcon(iconCode) {
     const iconMap = {
         'clear-day': '☀️',
@@ -4101,6 +4913,22 @@ function getWeatherIcon(iconCode) {
     return iconMap[iconCode] || '🌤️';
 }
 
+/**
+ * Replace the dashboard chart series with the server's observation history.
+ *
+ * If the charts are not ready yet, the history is parked in
+ * `window.__pendingHistoricalData` for the chart initializer to replay. Applies
+ * `statusData.chartHistoryHours` as a cut-off. Only repopulates when the charts
+ * are empty or the history has more than 5 extra points with real timestamps, so
+ * each status poll does not wipe live data. Accepts both the weather API field
+ * names (`temperature`, `lastUpdate`, ...) and the history API names
+ * (`air_temperature`, `timestamp` in seconds, ...); points without either
+ * timestamp are spaced 10 s apart ending now. Afterwards validates, sorts and
+ * recomputes average, trend and accumulation lines and redraws.
+ *
+ * @param {Array<Object>} dataHistory Observations, oldest first.
+ * @returns {void}
+ */
 function populateChartsWithHistoricalData(dataHistory) {
     debugLog(logLevels.DEBUG, 'Populating charts with historical data', {
         dataPoints: dataHistory.length
@@ -4200,7 +5028,12 @@ function populateChartsWithHistoricalData(dataHistory) {
             rain: obs.rainRate
         });
 
-        // Defensive normalization for historical observation fields
+        /**
+         * Defensive normalization for historical observation fields.
+         * @param {*} v Candidate value.
+         * @param {number} [fallback=0] Value used when `v` is not a finite number.
+         * @returns {number}
+         */
         const safeNumber = (v, fallback = 0) => (typeof v === 'number' && Number.isFinite(v)) ? v : fallback;
 
         // Temperature - handle both formats (temperature or air_temperature)
@@ -4306,6 +5139,17 @@ function populateChartsWithHistoricalData(dataHistory) {
     });
 }
 
+/**
+ * Recompute derived lines for the dashboard charts after a bulk load.
+ *
+ * Validates and sorts each series, sets the average lines for temperature,
+ * humidity, wind and pressure, the pressure trend, and replaces rain dataset 1
+ * with the accumulation integrated from the rain-rate series (rate x elapsed
+ * hours, in display units). Light and UV naturally go to zero at night, so they
+ * get no average.
+ * @returns {void}
+ * @throws {TypeError} If any of those charts has not been created.
+ */
 function updateAverageAndTrendLines() {
     // Update temperature average
     if (charts.temperature.data.datasets[0].data.length > 0) {
@@ -4380,7 +5224,13 @@ function updateAverageAndTrendLines() {
     // UV data naturally goes to zero at night - no average needed
 }
 
-// Continue with HomeKit status update
+/**
+ * Render the HomeKit card: bridge status, accessory count, name and PIN, the
+ * connection-info and technical-details rows (shown as `N/A` when the bridge is
+ * off), the pairing QR code, and the accessories list.
+ * @param {Object} status Parsed `/api/status` response; reads `status.homekit`.
+ * @returns {void}
+ */
 function updateHomekitStatus(status) {
     // Update HomeKit status
     const homekitStatus = document.getElementById('homekit-status');
@@ -4461,7 +5311,14 @@ function updateHomekitStatus(status) {
     });
 }
 
-// Generate HomeKit QR code on canvas
+/**
+ * Generate the HomeKit pairing QR code on the `#homekit-qr-code` canvas (200x200 px).
+ *
+ * Encodes `X-HM://<payload>` with the global `qrcode` library when it is loaded,
+ * otherwise (or on any error) draws {@link generateFallbackQRCode}'s placeholder.
+ * @param {string} setupCode HomeKit setup code (8 digits, dashes allowed).
+ * @returns {void}
+ */
 function generateHomekitQRCode(setupCode) {
     const canvas = document.getElementById('homekit-qr-code');
     if (!canvas) return;
@@ -4525,7 +5382,17 @@ function generateHomekitQRCode(setupCode) {
     }
 }
 
-// Calculate HomeKit setup payload according to specification
+/**
+ * Calculate the HomeKit setup payload according to the specification.
+ *
+ * Intended 64-bit layout, as listed in the code: version (3 bits) 0, reserved (4)
+ * 0, category (8) 2 = bridge, flags (8) 0, setup code (27), reserved (4) 0,
+ * reserved (10) 0. Built with BigInt from LSB to MSB.
+ *
+ * @param {string} setupCode Setup code; non-digits are stripped.
+ * @returns {string} The payload as a decimal string.
+ * @throws {Error} If the code does not contain exactly 8 digits.
+ */
 function calculateHomekitPayload(setupCode) {
     // Extract digits from setup code (remove dashes and non-digits)
     const digits = setupCode.replace(/[^0-9]/g, '');
@@ -4565,7 +5432,13 @@ function calculateHomekitPayload(setupCode) {
 
 
 
-// Fallback QR code generation for errors
+/**
+ * Fallback QR code generation for errors: draws a 21x21 placeholder pattern that
+ * darkens one cell per setup-code digit greater than 5. It is not a scannable QR code.
+ * @param {HTMLCanvasElement} canvas Target canvas.
+ * @param {string} setupCode HomeKit setup code.
+ * @returns {void}
+ */
 function generateFallbackQRCode(canvas, setupCode) {
     const ctx = canvas.getContext('2d');
     const size = canvas.width;
@@ -4591,6 +5464,15 @@ function generateFallbackQRCode(canvas, setupCode) {
     debugLog(logLevels.WARN, 'Using fallback QR code generation');
 }
 
+/**
+ * Render the HomeKit accessories list: every configured sensor with its icon,
+ * enabled ones first and marked Active, the rest marked Disabled.
+ *
+ * A sensor counts as enabled when any accessory name contains it or vice versa.
+ * @param {Array<string>} accessoryNames Names of accessories the bridge exposes.
+ * @param {Array<string>} allSensors All configurable sensor names.
+ * @returns {void}
+ */
 function updateAccessoriesList(accessoryNames, allSensors) {
     debugLog(logLevels.DEBUG, 'Updating accessories list', { accessoryNames, allSensors });
     
@@ -4673,6 +5555,10 @@ function updateAccessoriesList(accessoryNames, allSensors) {
     });
 }
 
+/**
+ * Expand or collapse the HomeKit accessories section and flip its ▶/▼ icon.
+ * @returns {void}
+ */
 function toggleAccessoriesExpansion() {
     const expandedDiv = document.getElementById('accessories-expanded');
     const expandIcon = document.getElementById('accessories-expand-icon');
@@ -4692,6 +5578,10 @@ function toggleAccessoriesExpansion() {
     }
 }
 
+/**
+ * Expand or collapse the Tempest device status section and flip its ▶/▼ icon.
+ * @returns {void}
+ */
 function toggleDeviceStatusExpansion() {
     const expandedDiv = document.getElementById('device-status-expanded');
     const expandIcon = document.getElementById('device-status-expand-icon');
@@ -4711,6 +5601,10 @@ function toggleDeviceStatusExpansion() {
     }
 }
 
+/**
+ * Expand or collapse the Tempest hub status section and flip its ▶/▼ icon.
+ * @returns {void}
+ */
 function toggleHubStatusExpansion() {
     const expandedDiv = document.getElementById('hub-status-expanded');
     const expandIcon = document.getElementById('hub-status-expand-icon');
@@ -4730,6 +5624,10 @@ function toggleHubStatusExpansion() {
     }
 }
 
+/**
+ * Expand or collapse the HomeKit connection info section and flip its ▶/▼ icon.
+ * @returns {void}
+ */
 function toggleHomekitConnectionExpansion() {
     const expandedDiv = document.getElementById('homekit-connection-expanded');
     const expandIcon = document.getElementById('homekit-connection-expand-icon');
@@ -4749,6 +5647,10 @@ function toggleHomekitConnectionExpansion() {
     }
 }
 
+/**
+ * Expand or collapse the HomeKit technical details section and flip its ▶/▼ icon.
+ * @returns {void}
+ */
 function toggleHomekitTechnicalExpansion() {
     const expandedDiv = document.getElementById('homekit-technical-expanded');
     const expandIcon = document.getElementById('homekit-technical-expand-icon');
@@ -4768,7 +5670,11 @@ function toggleHomekitTechnicalExpansion() {
     }
 }
 
-// Toggle compact mode for Tempest card
+/**
+ * Toggle compact mode for the Tempest card, persist it to localStorage
+ * (`tempest-compact-mode`) and update the toggle button's active state.
+ * @returns {void}
+ */
 function toggleCompactMode() {
     const tempestCard = document.getElementById('tempest-card');
     if (tempestCard) {
@@ -4790,6 +5696,11 @@ function toggleCompactMode() {
     }
 }
 
+/**
+ * Toggle compact mode for the alarm card, persist it to localStorage
+ * (`alarm-compact-mode`) and update the toggle button's active state.
+ * @returns {void}
+ */
 function toggleAlarmCompactMode() {
     const alarmCard = document.getElementById('alarm-card');
     if (alarmCard) {
@@ -4811,7 +5722,12 @@ function toggleAlarmCompactMode() {
     }
 }
 
-// Update battery indicator with color coding
+/**
+ * Update the battery indicator with colour coding: good above 2.5 V, fair above
+ * 2.3 V, low otherwise; hidden when the voltage cannot be parsed.
+ * @param {number|string} voltage Battery voltage, or a string such as `"2.45V"`.
+ * @returns {void}
+ */
 function updateBatteryIndicator(voltage) {
     const indicator = document.getElementById('tempest-battery-indicator');
     if (!indicator) return;
@@ -4839,7 +5755,13 @@ function updateBatteryIndicator(voltage) {
     }
 }
 
-// Create signal strength bars
+/**
+ * Create four signal strength bars, lighting 4/3/2/1 of them for RSSI at or above
+ * -50/-60/-70 dBm or below.
+ * @param {number|string} rssi RSSI in dBm, or a string such as `"-45 dBm (Excellent)"`.
+ * @param {string} containerId Id of the element that receives the bars.
+ * @returns {void}
+ */
 function createSignalBars(rssi, containerId) {
     const container = document.getElementById(containerId);
     if (!container) return;
@@ -4882,7 +5804,18 @@ function createSignalBars(rssi, containerId) {
     }
 }
 
-// Enhanced DOM ready checking and event listener attachment with debug logging
+/**
+ * Attach an event listener by element id, waiting for the element if it is not in
+ * the DOM yet (enhanced DOM-ready checking with debug logging).
+ *
+ * If the element is missing, a MutationObserver and up to 10 retries 300 ms apart
+ * both try to attach the handler.
+ * @param {string} elementId Target element id.
+ * @param {string} event Event type, e.g. `'click'`.
+ * @param {EventListener} handler Listener to attach.
+ * @param {string} [description=''] Purpose, used only in log messages.
+ * @returns {void}
+ */
 function attachEventListener(elementId, event, handler, description = '') {
     const element = document.getElementById(elementId);
     if (element) {
@@ -4921,6 +5854,11 @@ function attachEventListener(elementId, event, handler, description = '') {
         const maxRetries = 10;
         const retryDelay = 300; // 300ms delay
         
+        /**
+         * One delayed retry of the attachment; reschedules itself until the element
+         * appears or the retry limit is reached, then disconnects the observer.
+         * @returns {void}
+         */
         const retryAttachment = () => {
             retryCount++;
             const retryElement = document.getElementById(elementId);
@@ -4953,7 +5891,15 @@ function attachEventListener(elementId, event, handler, description = '') {
     }
 }
 
-// Initialize when DOM is ready
+/**
+ * Initialize when the DOM is ready.
+ *
+ * Enables debug mode from `?loglevel=debug`, loads the server units, starts the
+ * first fetches, initializes the charts (directly on the popout page; on the
+ * dashboard via a resilient retry loop that can load the vendored Chart.js), wires
+ * the card toggles and tooltip handlers, restores compact modes, and starts
+ * polling: weather every 5 s, status and alarms every 10 s.
+ */
 document.addEventListener('DOMContentLoaded', function() {
     debugLog(logLevels.INFO, 'DOM Content Loaded - Initializing dashboard');
     
@@ -5055,6 +6001,15 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     } else {
         // Only attempt the full chart initialization flow on the dashboard page.
+        /**
+         * Try to initialize the dashboard charts, recovering from common failures.
+         *
+         * Gives up after 8 attempts. On a "canvas is already in use" error it runs one
+         * {@link destroyAllCharts} sweep and retries; if Chart.js is missing it loads
+         * `/pkg/web/static/chart.umd.js` and the date-fns adapter dynamically; otherwise
+         * it retries after 500 ms. Replays `window.__pendingHistoricalData` on success.
+         * @returns {void}
+         */
         (function initChartsResilient() {
         if (__chartsInitialized) return; // already initialized successfully
 
@@ -5121,12 +6076,20 @@ document.addEventListener('DOMContentLoaded', function() {
             const vendorScript = document.createElement('script');
             vendorScript.src = '/pkg/web/static/chart.umd.js';
             vendorScript.async = false;
+            /**
+             * Runs after the vendored Chart.js loads; loads the date adapter next.
+             * @returns {void}
+             */
             vendorScript.onload = function() {
                 debugLog(logLevels.INFO, 'Local Chart.js loaded, attempting to initialize charts');
                 // Try to load adapter as well (if present)
                 const adapter = document.createElement('script');
                 adapter.src = '/pkg/web/static/chartjs-adapter-date-fns.bundle.min.js';
                 adapter.async = false;
+                /**
+                 * Runs after the date adapter loads; initializes the charts and re-checks readiness.
+                 * @returns {void}
+                 */
                 adapter.onload = function() {
                     try {
                         initCharts();
@@ -5137,6 +6100,11 @@ document.addEventListener('DOMContentLoaded', function() {
                         debugLog(logLevels.ERROR, 'initCharts failed after loading vendor scripts', e);
                     }
                 };
+                /**
+                 * Adapter failed to load; still try to initialize the charts in case it isn't required.
+                 * @param {Event|string} err Load error.
+                 * @returns {void}
+                 */
                 adapter.onerror = function(err) {
                     debugLog(logLevels.ERROR, 'Failed to load local Chart adapter', err || {});
                     // Still try to initCharts in case adapter isn't required
@@ -5144,6 +6112,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 };
                 document.head.appendChild(adapter);
             };
+            /**
+             * Vendored Chart.js failed to load; log it and allow another load attempt.
+             * @param {Event|string} err Load error.
+             * @returns {void}
+             */
             vendorScript.onerror = function(err) {
                 debugLog(logLevels.ERROR, 'Failed to load local Chart.js vendor script', err || {});
                 __chartVendorLoading = false;
@@ -5257,7 +6230,16 @@ document.addEventListener('DOMContentLoaded', function() {
     debugLog(logLevels.INFO, 'Dashboard initialization completed');
 });
 
-// Regenerate weather data for testing (for generated weather mode)
+/**
+ * Regenerate the weather data for testing (generated weather mode only).
+ *
+ * POSTs `/api/regenerate-weather`, briefly shows "Regenerated! Refreshing..." in
+ * the station name and re-fetches weather and status after 1.5 s; on failure shows
+ * "Regeneration failed" for 2 s. Called from the station name link that
+ * {@link updateStatusDisplay} renders.
+ * @async
+ * @returns {Promise<void>}
+ */
 async function regenerateWeather() {
     try {
         debugLog(logLevels.INFO, 'Regenerating weather data...');
@@ -5308,6 +6290,11 @@ async function regenerateWeather() {
 
 // Debug function to test chart functionality
 if (DEBUG_MODE) {
+    /**
+     * Debug function to test chart functionality: logs chart state and pushes a test
+     * point (25) onto the temperature chart. Only defined when {@link DEBUG_MODE} is on at load.
+     * @returns {void}
+     */
     window.testCharts = function() {
         console.log('🔧 Testing charts functionality');
         console.log('Charts object:', charts);
@@ -5343,7 +6330,11 @@ if (DEBUG_MODE) {
         }
     };
 
-    // Deep chart diagnosis function
+    /**
+     * Deep chart diagnosis function: logs each chart's canvas, datasets and an update
+     * attempt, then Chart.js status. Only defined when {@link DEBUG_MODE} is on at load.
+     * @returns {void}
+     */
     window.diagnoseCharts = function() {
         console.log("🔬 DEEP CHART DIAGNOSIS:");
         
@@ -5390,7 +6381,11 @@ if (DEBUG_MODE) {
     };
 }
 
-// Canvas inspection function
+/**
+ * Canvas inspection function: logs size, style and container details for each
+ * dashboard chart canvas.
+ * @returns {void}
+ */
 window.inspectCanvas = function() {
     console.log("🎨 CANVAS INSPECTION:");
     
@@ -5436,7 +6431,11 @@ window.inspectCanvas = function() {
     });
 };
 
-// Force chart render function
+/**
+ * Force chart render function: calls `update('none')`, `render()` and `draw()` on
+ * every chart and logs the result.
+ * @returns {void}
+ */
 window.forceRenderCharts = function() {
     console.log("🔄 FORCING CHART RENDERS:");
     
@@ -5462,7 +6461,11 @@ window.forceRenderCharts = function() {
     });
 };
 
-// Recreate charts function 
+/**
+ * Recreate charts function: destroys every chart, clears {@link charts}, then after
+ * 100 ms re-runs {@link initCharts} and, if weather data exists, {@link updateCharts}.
+ * @returns {void}
+ */
 window.recreateCharts = function() {
     console.log("🔨 RECREATING ALL CHARTS:");
     
@@ -5496,7 +6499,12 @@ window.recreateCharts = function() {
     }, 100);
 };
 
-// Debug chart scales and force visible data
+/**
+ * Debug chart scales and force visible data: logs every dataset's values and every
+ * scale's range, then appends three test points (20, 25, 30) to each chart's
+ * dataset 0. Mutates live chart data.
+ * @returns {void}
+ */
 window.debugChartScales = function() {
     console.log("🔍 DEBUGGING CHART SCALES:");
     
@@ -5546,7 +6554,12 @@ window.debugChartScales = function() {
     });
 };
 
-// Fix timestamp issues in all charts
+/**
+ * Fix timestamp issues in all charts: replaces every dataset with three points at
+ * now-2 min, now-1 min and now (90 %, 95 % and 100 % of its last value, or 20/25/30).
+ * Destroys the real data.
+ * @returns {void}
+ */
 window.fixChartTimestamps = function() {
     console.log("🔧 FIXING CHART TIMESTAMPS:");
     
@@ -5595,7 +6608,10 @@ window.fixChartTimestamps = function() {
 // Theme Switching System
 // ============================================
 
-// Load saved theme on page load
+/**
+ * Load the saved theme on page load and keep it in sync with `#theme-select`,
+ * persisting changes to localStorage (`selected-theme`).
+ */
 document.addEventListener('DOMContentLoaded', function() {
     const savedTheme = localStorage.getItem('selected-theme') || 'default';
     applyTheme(savedTheme);
@@ -5614,7 +6630,12 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-// Apply theme to document
+/**
+ * Apply a theme to the document via `body[data-theme]` and adjust chart colours.
+ * @param {string} themeName Theme name; `'default'` removes the attribute, and
+ *   `'midnight'` switches the charts to dark-mode colours.
+ * @returns {void}
+ */
 function applyTheme(themeName) {
     const body = document.body;
     
@@ -5636,7 +6657,11 @@ function applyTheme(themeName) {
     }
 }
 
-// Update chart grid colors for dark mode
+/**
+ * Update chart grid and tick colours for dark or light mode, then redraw.
+ * @param {boolean} isDark `true` for the dark-theme colours.
+ * @returns {void}
+ */
 function updateChartsForDarkMode(isDark) {
     const gridColor = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
     const textColor = isDark ? '#e0e0e0' : '#666';
@@ -5665,7 +6690,14 @@ function updateChartsForDarkMode(isDark) {
     });
 }
 
-// Fetch and display alarm status
+/**
+ * Fetch `/api/alarm-status` and display it via {@link updateAlarmStatus}.
+ *
+ * On any failure renders a placeholder status (disabled, "Error loading", no alarms)
+ * instead of throwing.
+ * @async
+ * @returns {Promise<void>}
+ */
 async function fetchAlarmStatus() {
     try {
         debugLog(logLevels.DEBUG, 'Fetching alarm status...');
@@ -5687,7 +6719,24 @@ async function fetchAlarmStatus() {
     }
 }
 
-// Update alarm status display
+/**
+ * Update the alarm status card and the list of enabled alarms.
+ *
+ * Callers (tests) may provide an explicit window/document via `opts`; otherwise
+ * JSDOM-provided globals, then the real browser globals are used. Builds a tag
+ * filter `<select>` from the alarms' tags (the `?tag=` URL parameter takes
+ * precedence over the selection persisted in localStorage `alarm-selected-tag`;
+ * changing it updates the URL and re-renders with the same data). Each enabled
+ * alarm that matches the URL tag filter gets an expandable item (state persisted
+ * in `alarm-expanded-set`) showing schedule state, condition, last trigger,
+ * trigger count, channels, tags and cooldown. Honours `alarm-compact-mode`.
+ * Exported for jest via `module.exports.updateAlarmStatus`.
+ *
+ * @param {AlarmStatus} data Parsed `/api/alarm-status` response.
+ * @param {{window: (Window|undefined), document: (Document|undefined)}} [opts]
+ *   Explicit globals to use instead of the ambient ones.
+ * @returns {void}
+ */
 function updateAlarmStatus(data, opts) {
     // Allow callers (tests) to provide explicit window/document via opts
     const optWin = opts && opts.window ? opts.window : null;

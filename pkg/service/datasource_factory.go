@@ -1,4 +1,6 @@
-// Package service provides data source factory for creating appropriate weather data sources.
+// This file provides the data source factory for creating appropriate weather
+// data sources (see the package documentation in service.go).
+
 package service
 
 import (
@@ -23,6 +25,19 @@ var DataSourceFactory DataSourceFactoryFunc = CreateDataSource
 // This is the only place in the codebase that needs to know about different data source types.
 // For UDP mode, the udpListener parameter must be provided as interface{} (pass nil for other modes).
 // For generated weather, the generator parameter can be provided as interface{} (pass nil to create new).
+//
+// The first matching mode wins: cfg.UDPStream (UDP broadcast data source;
+// the WeatherFlow token is passed only when internet access is allowed, for
+// forecasts), then a non-empty cfg.StationURL (API data source polling that
+// URL), then cfg.UseGeneratedWeather (generated data source with a fake
+// station ID 99999; station is ignored), and otherwise the WeatherFlow API
+// data source for station.
+//
+// udpListener must implement weather.UDPListener (normally a
+// *udp.UDPListener); genParam, if non-nil, should be a
+// *generator.WeatherGenerator and is replaced by a new generator (with a
+// warning) if it is not. It returns an error if UDP mode has a nil or
+// wrongly typed listener, or if API mode has a nil station.
 func CreateDataSource(cfg *config.Config, station *weather.Station, udpListener interface{}, genParam interface{}) (weather.DataSource, error) {
 	// Priority order:
 	// 1. UDP Stream (if enabled)

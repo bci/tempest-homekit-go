@@ -8,12 +8,13 @@ import (
 	"testing"
 )
 
-// helperRoundTripper rewrites requests to the test server URL
+// helperRoundTripper rewrites requests to the test server URL: it sends each request to rewriteTo (host:port) over plain HTTP via base.
 type helperRoundTripper struct {
 	base      http.RoundTripper
 	rewriteTo string
 }
 
+// RoundTrip points req at the test server and forwards it to the base transport.
 func (h *helperRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	// Rewrite the request URL to the test server
 	req.URL.Scheme = "http"
@@ -21,6 +22,7 @@ func (h *helperRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 	return h.base.RoundTrip(req)
 }
 
+// TestGetStations checks that GetStations decodes the station list.
 func TestGetStations(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// simple stations response
@@ -45,6 +47,7 @@ func TestGetStations(t *testing.T) {
 	}
 }
 
+// TestGetStationDetails checks that GetStationDetails returns the first station in the response.
 func TestGetStationDetails(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := StationDetailsResponse{Stations: []Station{{StationID: 2, Name: "Detail", StationName: "Detail"}}}
@@ -67,6 +70,7 @@ func TestGetStationDetails(t *testing.T) {
 	}
 }
 
+// TestGetHistoricalObservationsWithProgress_Small checks that device observations are fetched and parsed for a station with a Tempest device.
 func TestGetHistoricalObservationsWithProgress_Small(t *testing.T) {
 	// Simulate device endpoint returning historical obs for two days
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

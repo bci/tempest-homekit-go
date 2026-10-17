@@ -5,6 +5,7 @@ import (
 	"time"
 )
 
+// TestParseDeviceObservations checks that a device row maps air temperature and station pressure.
 func TestParseDeviceObservations(t *testing.T) {
 	ts := float64(time.Now().Unix())
 	arr := [][]interface{}{
