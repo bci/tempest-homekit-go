@@ -8,14 +8,15 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
-// dsErrorFactory returns an error when called to simulate factory failure
+// dsErrorFactory returns an error when called to simulate factory failure.
 func dsErrorFactory(cfg *config.Config, station *weather.Station, udpListener interface{}, genParam interface{}) (weather.DataSource, error) {
 	return nil, errors.New("factory failed")
 }
 
-// fakeDataSourceStartError implements weather.DataSource where Start returns an error
+// fakeDataSourceStartError implements weather.DataSource where Start returns an error; the other methods return zero values.
 type fakeDataSourceStartError struct{}
 
+// Start always fails with "start failed".
 func (f *fakeDataSourceStartError) Start() (<-chan weather.Observation, error) {
 	return nil, errors.New("start failed")
 }
@@ -27,10 +28,14 @@ func (f *fakeDataSourceStartError) GetStatus() weather.DataSourceStatus {
 }
 func (f *fakeDataSourceStartError) GetType() weather.DataSourceType { return "fake" }
 
+// dsStartErrorFactory returns a fakeDataSourceStartError.
 func dsStartErrorFactory(cfg *config.Config, station *weather.Station, udpListener interface{}, genParam interface{}) (weather.DataSource, error) {
 	return &fakeDataSourceStartError{}, nil
 }
 
+// TestStartService_FactoryErrorPropagates expects StartService to fail when the
+// factory fails. In API mode with no token the station lookup fails first, so
+// the factory is not actually reached.
 func TestStartService_FactoryErrorPropagates(t *testing.T) {
 	orig := DataSourceFactory
 	defer func() { DataSourceFactory = orig }()
@@ -47,6 +52,9 @@ func TestStartService_FactoryErrorPropagates(t *testing.T) {
 	}
 }
 
+// TestStartService_DataSourceStartErrorPropagates expects StartService to fail
+// when the data source cannot start. With a fake token the WeatherFlow station
+// lookup fails first, so Start is not actually reached.
 func TestStartService_DataSourceStartErrorPropagates(t *testing.T) {
 	orig := DataSourceFactory
 	defer func() { DataSourceFactory = orig }()

@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+// TestAPIDataSource_GetType checks the generated, custom-URL and API type detection.
 func TestAPIDataSource_GetType(t *testing.T) {
 	a1 := NewAPIDataSource(0, "", "", APIDataSourceOptions{CustomURL: "http://localhost:8080/api/generate-weather", GeneratedPath: "/api/generate-weather"})
 	if a1.GetType() != DataSourceGenerated {
@@ -24,6 +25,7 @@ func TestAPIDataSource_GetType(t *testing.T) {
 	}
 }
 
+// TestAPIDataSource_CustomURLAndStartStop checks that a generated-endpoint source reports its URL and starts and stops cleanly.
 func TestAPIDataSource_CustomURLAndStartStop(t *testing.T) {
 	jsonBody := `{"obs":[{"timestamp": 1696761600, "wind_avg": 2.5, "brightness": 200, "uv": 3, "precip": 0.0, "precipitation_type": 0, "battery": 3.8, "report_interval": 60}]}`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -60,6 +62,7 @@ func TestAPIDataSource_CustomURLAndStartStop(t *testing.T) {
 	}
 }
 
+// TestAPIDataSource_GeneratedDetectionAndFetch checks that a started generated-endpoint source fetches an initial observation.
 func TestAPIDataSource_GeneratedDetectionAndFetch(t *testing.T) {
 	jsonBody := `{"obs":[{"timestamp": 1696761600, "wind_avg": 2.5, "brightness": 200, "uv": 3, "precip": 0.0, "precipitation_type": 0, "battery": 3.8, "report_interval": 60}]}`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

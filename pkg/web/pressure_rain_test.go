@@ -8,6 +8,8 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
+// TestCalculateSeaLevelPressure_Extra checks that sea-level pressure equals
+// station pressure at zero elevation.
 func TestCalculateSeaLevelPressure_Extra(t *testing.T) {
 	stationPressure := 1013.25
 	temperature := 15.0
@@ -19,6 +21,8 @@ func TestCalculateSeaLevelPressure_Extra(t *testing.T) {
 	}
 }
 
+// TestGetPressureDescription_Extra checks the Low, High and Normal pressure
+// bands.
 func TestGetPressureDescription_Extra(t *testing.T) {
 	if getPressureDescription(970) != "Low" {
 		t.Fatalf("expected Low for 970")
@@ -31,6 +35,8 @@ func TestGetPressureDescription_Extra(t *testing.T) {
 	}
 }
 
+// TestGetPressureTrend_Extra checks Rising, Falling and Stable trends from
+// two-point histories.
 func TestGetPressureTrend_Extra(t *testing.T) {
 	// Rising
 	d1 := []weather.Observation{{Timestamp: time.Now().Add(-10 * time.Minute).Unix(), StationPressure: 1000}, {Timestamp: time.Now().Unix(), StationPressure: 1002.5}}
@@ -51,6 +57,8 @@ func TestGetPressureTrend_Extra(t *testing.T) {
 	}
 }
 
+// TestGetPressureWeatherForecast_Extra checks every branch of
+// getPressureWeatherForecast.
 func TestGetPressureWeatherForecast_Extra(t *testing.T) {
 	if getPressureWeatherForecast(1015, "Rising") != "Fair Weather" {
 		t.Fatalf("unexpected forecast for Rising/1015")
@@ -78,6 +86,9 @@ func TestGetPressureWeatherForecast_Extra(t *testing.T) {
 	}
 }
 
+// TestCalculateDailyRainForTimeAndAccumulation_Extra checks the latest-minus-
+// earliest daily rain total from both calculateDailyRainForTime and
+// calculateDailyRainAccumulation, and the single-observation case.
 func TestCalculateDailyRainForTimeAndAccumulation_Extra(t *testing.T) {
 	// Build a simple history for today: startOfDay reading 1.0, later reading 1.5
 	now := time.Now()

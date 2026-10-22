@@ -1,6 +1,12 @@
 // Package main implements a HomeKit bridge for WeatherFlow Tempest weather stations.
 // It provides a HomeKit-compatible interface to access weather data from Tempest stations,
 // along with a web dashboard for monitoring and configuration.
+//
+// Besides the normal long-running service, the binary has several one-shot
+// modes selected by flags (alarm editor, notification delivery tests, UDP,
+// HomeKit, API and history tests, database clearing, webhook listener and
+// status console). main checks them in a fixed order and runs only the
+// first one that is set; see main for the order.
 package main
 
 import (
@@ -29,6 +35,20 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// main loads the environment file and configuration, sets up logging, and
+// dispatches to the requested mode.
+//
+// The --env value is scanned from os.Args before flag parsing so that the
+// environment file can supply defaults that flags then override. A missing
+// default .env is ignored silently; a missing custom file is logged as a
+// warning. One-shot modes are checked in this order and the first match
+// runs and returns or exits: --version, --status-theme-list, --alarms-edit,
+// --test-email, --test-sms, --test-webhook, --test-console, --test-syslog,
+// --test-oslog, --test-eventlog, --test-udp, --test-homekit,
+// --test-web-status, --test-alarm, --test-api, --test-history,
+// --test-api-local, --cleardb, webhook listener flags, and --status.
+// Otherwise it starts the service and blocks until SIGINT or SIGTERM.
+// Startup failures are fatal (log.Fatalf).
 func main() {
 	// Parse --env flag early to determine which environment file to load
 	envFile := ".env"
@@ -260,7 +280,12 @@ func main() {
 	logger.Info("Received signal %v, shutting down...", sig)
 }
 
-// runEmailTest sends a test email using the configured email settings
+// runEmailTest sends a test email using the configured email settings.
+//
+// The email channel settings come from the alarm configuration in
+// cfg.Alarms; the recipient cfg.TestEmail is handed to the alarm package via
+// the TEST_EMAIL_RECIPIENT environment variable. It exits fatally when no
+// alarm configuration is given.
 func runEmailTest(cfg *config.Config) {
 	fmt.Println("=== Email Configuration Test ===")
 	fmt.Println()
@@ -276,7 +301,12 @@ func runEmailTest(cfg *config.Config) {
 	alarm.RunEmailTest(cfg.Alarms, cfg.StationName)
 }
 
-// runSMSTest sends a test SMS using the configured SMS settings
+// runSMSTest sends a test SMS using the configured SMS settings.
+//
+// The SMS channel settings come from the alarm configuration in cfg.Alarms;
+// the recipient cfg.TestSMS is handed to the alarm package via the
+// TEST_SMS_RECIPIENT environment variable. It exits fatally when no alarm
+// configuration is given.
 func runSMSTest(cfg *config.Config) {
 	fmt.Println("=== SMS Configuration Test ===")
 	fmt.Println()
@@ -292,7 +322,11 @@ func runSMSTest(cfg *config.Config) {
 	alarm.RunSMSTest(cfg.Alarms, cfg.StationName)
 }
 
-// runWebhookTest sends a test webhook using the configured webhook settings
+// runWebhookTest sends a test webhook using the configured webhook settings.
+//
+// The target URL cfg.TestWebhook is handed to the alarm package via the
+// TEST_WEBHOOK_URL environment variable. It exits fatally when no alarm
+// configuration is given.
 func runWebhookTest(cfg *config.Config) {
 	fmt.Println("=== Webhook Configuration Test ===")
 	fmt.Println()
@@ -308,7 +342,10 @@ func runWebhookTest(cfg *config.Config) {
 	alarm.RunWebhookTest(cfg.Alarms, cfg.StationName)
 }
 
-// runConsoleTest sends a test console notification
+// runConsoleTest sends a test console notification.
+//
+// It delegates to the alarm package using cfg.Alarms and cfg.StationName,
+// and exits fatally when no alarm configuration is given.
 func runConsoleTest(cfg *config.Config) {
 	fmt.Println("=== Console Notification Test ===")
 	fmt.Println()
@@ -321,7 +358,10 @@ func runConsoleTest(cfg *config.Config) {
 	alarm.RunConsoleTest(cfg.Alarms, cfg.StationName)
 }
 
-// runSyslogTest sends a test syslog notification
+// runSyslogTest sends a test syslog notification.
+//
+// It delegates to the alarm package using cfg.Alarms and cfg.StationName,
+// and exits fatally when no alarm configuration is given.
 func runSyslogTest(cfg *config.Config) {
 	fmt.Println("=== Syslog Notification Test ===")
 	fmt.Println()
@@ -334,7 +374,10 @@ func runSyslogTest(cfg *config.Config) {
 	alarm.RunSyslogTest(cfg.Alarms, cfg.StationName)
 }
 
-// runOSLogTest sends a test oslog notification
+// runOSLogTest sends a test oslog notification.
+//
+// It delegates to the alarm package using cfg.Alarms and cfg.StationName,
+// and exits fatally when no alarm configuration is given.
 func runOSLogTest(cfg *config.Config) {
 	fmt.Println("=== OSLog Notification Test ===")
 	fmt.Println()
@@ -347,7 +390,10 @@ func runOSLogTest(cfg *config.Config) {
 	alarm.RunOSLogTest(cfg.Alarms, cfg.StationName)
 }
 
-// runEventLogTest sends a test eventlog notification
+// runEventLogTest sends a test eventlog notification.
+//
+// It delegates to the alarm package using cfg.Alarms and cfg.StationName,
+// and exits fatally when no alarm configuration is given.
 func runEventLogTest(cfg *config.Config) {
 	fmt.Println("=== EventLog Notification Test ===")
 	fmt.Println()
@@ -360,7 +406,13 @@ func runEventLogTest(cfg *config.Config) {
 	alarm.RunEventLogTest(cfg.Alarms, cfg.StationName)
 }
 
-// runUDPTest listens for UDP broadcasts from a local Tempest station
+// runUDPTest listens for UDP broadcasts from a local Tempest station.
+//
+// It listens on UDP port 50222 for the given number of seconds,
+// pretty-printing each packet as it arrives and a progress line every five
+// seconds, then prints final statistics and the latest observation and
+// calls os.Exit(0). The config argument is unused. Failure to start the
+// listener is fatal.
 func runUDPTest(_ *config.Config, seconds int) {
 	fmt.Printf("=== UDP Broadcast Listener Test (%d seconds) ===\n\n", seconds)
 
@@ -456,7 +508,11 @@ func runUDPTest(_ *config.Config, seconds int) {
 	}
 }
 
-// runHomeKitTest tests the HomeKit bridge setup
+// runHomeKitTest tests the HomeKit bridge setup.
+//
+// It is a dry run: it prints the PIN, the parsed sensor selection and the
+// bridge identity and pairing steps that would be used, without starting a
+// bridge, then calls os.Exit(0).
 func runHomeKitTest(cfg *config.Config) {
 	fmt.Println("=== HomeKit Bridge Test ===")
 	fmt.Println()
@@ -500,7 +556,11 @@ func runHomeKitTest(cfg *config.Config) {
 	os.Exit(0)
 }
 
-// runWebStatusTest tests web status scraping
+// runWebStatusTest tests web status scraping.
+//
+// The test is not implemented: after checking that a token and station name
+// are set (fatal otherwise) it only prints manual testing guidance and calls
+// os.Exit(0).
 func runWebStatusTest(cfg *config.Config) {
 	fmt.Println("=== Web Status Scraping Test ===")
 	fmt.Println()
@@ -526,7 +586,15 @@ func runWebStatusTest(cfg *config.Config) {
 	os.Exit(0)
 }
 
-// runAlarmTest triggers a specific alarm for testing
+// runAlarmTest triggers a specific alarm for testing.
+//
+// It loads cfg.Alarms, finds the alarm named cfg.TestAlarm, prints its
+// details, and feeds a fixed synthetic observation (25 °C, 60% humidity and
+// similar defaults) to a new alarm manager, then calls os.Exit(0). Missing
+// configuration, an unknown name or a disabled alarm is fatal. It overrides
+// the condition only on its own copy of the alarm, not on the manager's, so
+// whether notifications fire depends on the alarm's real condition matching
+// the synthetic observation.
 func runAlarmTest(cfg *config.Config) {
 	fmt.Printf("=== Alarm Trigger Test: %s ===\n\n", cfg.TestAlarm)
 
@@ -608,7 +676,8 @@ func runAlarmTest(cfg *config.Config) {
 	os.Exit(0)
 }
 
-// contains checks if a string slice contains a specific string
+// contains checks if a string slice contains a specific string, using exact
+// comparison. main uses it to spot a bare --test-udp in os.Args.
 func contains(slice []string, str string) bool {
 	for _, s := range slice {
 		if s == str {
@@ -618,7 +687,15 @@ func contains(slice []string, str string) bool {
 	return false
 }
 
-// runWebhookListener starts an HTTP server to listen for incoming webhook requests
+// runWebhookListener starts an HTTP server to listen for incoming webhook requests.
+//
+// port is the TCP port to listen on (all interfaces). Endpoints are
+// POST /webhook, which logs the body (formatted as an alarm notification
+// when it matches WebhookAlarmPayload) and replies with a JSON
+// acknowledgement; GET /health; and / (any other path), which returns
+// plain-text usage. It blocks until SIGINT or SIGTERM, shuts down with a
+// five second grace period and calls os.Exit(0). A listen error is logged
+// but does not end the wait for a signal.
 func runWebhookListener(port string) {
 	logger.Info("Starting webhook listener server on port %s", port)
 	logger.Info("Webhook endpoints: POST /webhook, GET /health, GET /")
@@ -749,20 +826,29 @@ Server started at: %s
 }
 
 // WebhookAlarmPayload represents the structure of incoming webhook payloads
+// in the JSON shape used by this application's webhook alarm templates
+// (see the default body in pkg/alarm/webhooktest.go).
 type WebhookAlarmPayload struct {
+	// Alarm identifies the alarm that fired. Tags is a comma-separated list.
 	Alarm struct {
 		Name        string `json:"name"`
 		Description string `json:"description"`
 		Condition   string `json:"condition"`
 		Tags        string `json:"tags"`
 	} `json:"alarm"`
-	Station   string                 `json:"station"`
-	Timestamp string                 `json:"timestamp"`
-	Sensors   map[string]interface{} `json:"sensors"`
-	AppInfo   string                 `json:"app_info"`
+	Station   string                 `json:"station"`   // Station name
+	Timestamp string                 `json:"timestamp"` // "2006-01-02 15:04:05 MST" or RFC 3339
+	Sensors   map[string]interface{} `json:"sensors"`   // Sensor readings keyed by name with unit suffix, e.g. "temperature_c"
+	AppInfo   string                 `json:"app_info"`  // Free-form sender application information; not used for formatting
 }
 
-// formatWebhookAlarmMessage parses webhook payload and formats it like console notifications
+// formatWebhookAlarmMessage parses webhook payload and formats it like console notifications.
+//
+// body is the raw request body. It returns "" when the body is not JSON or
+// lacks an alarm name or sensor readings, so callers can skip non-alarm
+// payloads. Known sensor keys are mapped onto a weather.Observation; an
+// unparsable or missing timestamp falls back to now. The result is a
+// multi-line plain-text message.
 func formatWebhookAlarmMessage(body []byte) string {
 	var payload WebhookAlarmPayload
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -856,7 +942,11 @@ func formatWebhookAlarmMessage(body []byte) string {
 	return message
 }
 
-// formatAlarmInfo returns formatted alarm information
+// formatAlarmInfo returns formatted alarm information.
+//
+// It lists name, description, condition, enabled status, cooldown (shown in
+// the largest whole unit of hours, minutes or seconds) and tags. isHTML
+// selects an inline-styled HTML table instead of plain text lines.
 func formatAlarmInfo(alarm *alarm.Alarm, isHTML bool) string {
 	enabledStr := "enabled"
 	if !alarm.Enabled {
@@ -891,7 +981,14 @@ func formatAlarmInfo(alarm *alarm.Alarm, isHTML bool) string {
 		alarm.Name, alarm.Description, alarm.Condition, enabledStr, cooldownStr, tagsStr)
 }
 
-// formatSensorInfoWithAlarm returns formatted sensor information with alarm context
+// formatSensorInfoWithAlarm returns formatted sensor information with alarm context.
+//
+// It shows each current reading from obs (with imperial conversions for
+// temperature, wind and daily rain, and a cardinal wind direction) beside
+// the "Last" value recorded on alarm, preferring the value captured when the
+// alarm triggered over the previous value. "Last" is "N/A" when alarm is nil
+// or has no value for that sensor. isHTML selects an inline-styled HTML
+// table instead of plain text lines.
 func formatSensorInfoWithAlarm(obs *weather.Observation, alarm *alarm.Alarm, isHTML bool) string {
 	tempF := obs.AirTemperature*9/5 + 32
 	windSpeedMph := obs.WindAvg * 2.23694
@@ -1000,7 +1097,8 @@ Lightning: %d strikes [Last: %s strikes]`,
 		obs.LightningStrikeCount, getPrevValue("lightning_count", float64(obs.LightningStrikeCount), "%.0f"))
 }
 
-// formatNumber formats a number with thousands separator
+// formatNumber formats a number with thousands separator, rounded to a whole
+// number (for example 12345.6 becomes "12,346").
 func formatNumber(n float64) string {
 	s := fmt.Sprintf("%.0f", n)
 	if len(s) <= 3 {
@@ -1019,6 +1117,11 @@ func formatNumber(n float64) string {
 
 // runAPITests performs comprehensive testing of all WeatherFlow API endpoints
 // to verify connectivity and data availability before starting the main service.
+//
+// In order it fetches the station list, the named station's details and
+// Tempest device ID, the current observation, recent historical
+// observations and the forecast, printing a summary of each (and the raw
+// JSON when the log level is debug). The first failure is fatal.
 func runAPITests(cfg *config.Config) {
 	fmt.Println("=== WeatherFlow API Endpoint Tests ===")
 
@@ -1215,6 +1318,11 @@ func runAPITests(cfg *config.Config) {
 
 // runHistoryTest fetches as much historical data as possible and prints starting
 // timestamps for each 500-point block running back in time.
+//
+// It requests up to 365 days using the configured history reduction
+// settings, then prints the oldest timestamp, the first timestamp of every
+// 500-observation block (newest first) and the total time covered. Station
+// lookup or fetch failures are fatal.
 func runHistoryTest(cfg *config.Config) {
 	fmt.Println("=== Historical Data Coverage Test ===")
 
@@ -1277,6 +1385,18 @@ func runHistoryTest(cfg *config.Config) {
 	fmt.Printf("Data coverage: %s to %s (%.2f hours)\n", oldest.Format("2006-01-02 15:04:05"), newest.Format("2006-01-02 15:04:05"), newest.Sub(oldest).Hours())
 }
 
+// runLocalAPITests starts the service in-process and smoke-tests the local
+// web API endpoints.
+//
+// It forces HomeKit off, switches the default web port 8080 to 8084 (and a
+// generated-weather StationURL with it) to avoid clashing with a running
+// instance, quietens logging unless debug, starts the service in a
+// goroutine and waits three seconds for it. It then requests /api/weather,
+// /api/status, /api/alarm-status, /api/history, /api/units and, with
+// generated weather, /api/generate-weather via testEndpoint. It mutates cfg.
+// The summary always reports success; individual failures appear only in
+// the per-endpoint output. The context it creates is not passed to the
+// service, so cancelling it does not stop the service.
 func runLocalAPITests(cfg *config.Config) {
 	fmt.Println("=== Local Web Server API Endpoint Tests ===")
 	fmt.Println()
@@ -1370,6 +1490,12 @@ func runLocalAPITests(cfg *config.Config) {
 	time.Sleep(1 * time.Second)
 }
 
+// testEndpoint fetches url with client and reports whether it returned
+// HTTP 200 with valid JSON.
+//
+// name labels the output and selects which summary fields are printed when
+// debug is false; when debug is true the indented raw JSON is printed
+// instead. Failures are printed with a ❌ marker and are not returned.
 func testEndpoint(client *http.Client, url, name string, debug bool) {
 	resp, err := client.Get(url)
 	if err != nil {

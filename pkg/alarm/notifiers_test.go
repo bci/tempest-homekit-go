@@ -7,6 +7,9 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
+// TestExpandTemplate checks that expandTemplate substitutes each observation, alarm and
+// station variable, combines several in one template and leaves unknown variables
+// untouched.
 func TestExpandTemplate(t *testing.T) {
 	alarm := &Alarm{
 		Name:        "test-alarm",
@@ -137,6 +140,7 @@ func TestExpandTemplate(t *testing.T) {
 	}
 }
 
+// TestConsoleNotifier checks that ConsoleNotifier.Send returns no error.
 func TestConsoleNotifier(t *testing.T) {
 	notifier := &ConsoleNotifier{}
 
@@ -161,6 +165,8 @@ func TestConsoleNotifier(t *testing.T) {
 	}
 }
 
+// TestNotifierFactory checks that GetNotifier returns a notifier for each supported
+// channel type, webhook included, and an error for an invalid one.
 func TestNotifierFactory(t *testing.T) {
 	config := &AlarmConfig{}
 	factory := NewNotifierFactory(config)
@@ -218,6 +224,8 @@ func TestNotifierFactory(t *testing.T) {
 	}
 }
 
+// TestExpandTemplateWithEmptyValues checks that zero readings are rendered ("0.0", "0")
+// rather than blanked.
 func TestExpandTemplateWithEmptyValues(t *testing.T) {
 	alarm := &Alarm{Name: "test"}
 	stationName := "Test"
@@ -252,6 +260,8 @@ func TestExpandTemplateWithEmptyValues(t *testing.T) {
 	}
 }
 
+// TestExpandTemplateEdgeCases checks empty and variable-free templates, that an
+// unterminated "{{" is left alone, and that extra outer braces survive substitution.
 func TestExpandTemplateEdgeCases(t *testing.T) {
 	alarm := &Alarm{Name: "test"}
 	obs := &weather.Observation{AirTemperature: 25.0}

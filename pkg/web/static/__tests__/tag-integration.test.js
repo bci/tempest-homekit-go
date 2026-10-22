@@ -1,9 +1,22 @@
 /* eslint-env jest */
+/**
+ * @module tag-integration.test
+ * @description Exercises computeSelectedTag from ../alarm-utils.js against a real JSDOM
+ * location, localStorage and <select>, mimicking how the dashboard would apply it.
+ * The dashboard script itself is not loaded here.
+ */
 const { JSDOM } = require('jsdom');
 const path = require('path');
+/** The alarm-utils module under test. */
 const alarmUtils = require(path.resolve(__dirname, '../alarm-utils.js'));
 
+/**
+ * Tag precedence between URL and localStorage, applied to a DOM select.
+ */
 describe('alarm tag select integration using alarm-utils', () => {
+  /**
+   * ?tag=indoor wins over a persisted 'outdoor'; no URL rewrite is requested.
+   */
   test('URL tag takes precedence over persisted tag', () => {
     const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/?tag=indoor' });
     const { window } = dom;
@@ -32,6 +45,10 @@ describe('alarm tag select integration using alarm-utils', () => {
     expect(select.value).toBe('indoor');
   });
 
+  /**
+   * With no tag param, a valid persisted tag is selected and a new query string
+   * containing it is returned and can be pushed to history.
+   */
   test('Persisted tag applied and URL updated when no tag param', () => {
     const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost/' });
     const { window } = dom;

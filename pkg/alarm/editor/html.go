@@ -1,5 +1,13 @@
 package editor
 
+// indexHTML is the alarm editor's single-page HTML, parsed by handleIndex as
+// an html/template.
+//
+// It interpolates .ConfigPath, .Version, .LastLoad and the other fields
+// handleIndex supplies, and loads styles.css, themes.css and script.js from
+// /alarm-editor/static/. Literal message-template placeholders shown to the
+// user are written as {{ "{{" }}name}} so the template engine emits "{{name}}"
+// instead of treating them as actions.
 const indexHTML = `<!DOCTYPE html>
 <html lang="en">
 <head>

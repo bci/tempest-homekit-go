@@ -8,6 +8,8 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
+// TestCalculateSeaLevelPressure checks that sea-level pressure equals station
+// pressure at 0 m and is higher at 1000 m.
 func TestCalculateSeaLevelPressure(t *testing.T) {
 	// Known inputs - station pressure around sea level should be near station value
 	stationPressure := 1013.25
@@ -27,6 +29,7 @@ func TestCalculateSeaLevelPressure(t *testing.T) {
 	}
 }
 
+// TestGetPressureDescription checks the Low, High and Normal pressure bands.
 func TestGetPressureDescription(t *testing.T) {
 	if getPressureDescription(970) != "Low" {
 		t.Fatalf("expected Low for 970")
@@ -39,6 +42,8 @@ func TestGetPressureDescription(t *testing.T) {
 	}
 }
 
+// TestGetPressureWeatherForecast checks the Rising/Fair Weather and the two
+// Falling forecast branches.
 func TestGetPressureWeatherForecast(t *testing.T) {
 	if getPressureWeatherForecast(1025, "Rising") != "Fair Weather" {
 		t.Fatalf("unexpected forecast for 1025 Rising")
@@ -51,6 +56,8 @@ func TestGetPressureWeatherForecast(t *testing.T) {
 	}
 }
 
+// TestGetPressureTrend checks Rising, Falling and Stable trends from short
+// synthetic histories.
 func TestGetPressureTrend(t *testing.T) {
 	// Build simple history with rising pressure over time
 	now := time.Now()

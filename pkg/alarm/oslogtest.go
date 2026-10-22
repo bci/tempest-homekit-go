@@ -10,7 +10,13 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
-// TestOSLogConfiguration tests oslog notification by sending a test message (macOS only)
+// TestOSLogConfiguration tests oslog notification by sending a test message (macOS only).
+//
+// alarmsJSON is the alarm config input accepted by [LoadAlarmConfig];
+// stationName fills {{station}}. It returns an error immediately on non-macOS
+// systems, and otherwise if the config fails to load or the send fails. On
+// success it prints Console.app and `log show` commands for finding the
+// "Tempest-Test" message.
 func TestOSLogConfiguration(alarmsJSON, stationName string) error {
 	fmt.Println("Testing oslog notification (macOS unified logging)...")
 	fmt.Println()
@@ -72,7 +78,8 @@ func TestOSLogConfiguration(alarmsJSON, stationName string) error {
 	return nil
 }
 
-// RunOSLogTest is a convenience function that wraps TestOSLogConfiguration and exits
+// RunOSLogTest is a convenience function that wraps TestOSLogConfiguration and exits.
+// It never returns: it calls os.Exit(0) on success and log.Fatalf on failure.
 func RunOSLogTest(alarmsJSON, stationName string) {
 	if err := TestOSLogConfiguration(alarmsJSON, stationName); err != nil {
 		log.Fatalf("OSLog test failed: %v", err)

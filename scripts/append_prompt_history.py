@@ -1,10 +1,21 @@
 #!/usr/bin/env python3
-"""Append a timestamped paraphrased prompt to PROMPT_HISTORY.md
+"""Append a timestamped paraphrased prompt to PROMPT_HISTORY.md.
 
 Usage:
   python3 scripts/append_prompt_history.py "Paraphrased prompt text" "Short outcome"
 
 This script will append a new bullet with the current ISO timestamp.
+
+The bullet has the form ``- [YYYY-MM-DDTHH:MM:SSZ] "paraphrase"`` followed by
+`` — Outcome: outcome`` when a non-empty second argument is given. The
+timestamp is UTC with microseconds dropped. Both arguments are stripped of
+surrounding whitespace; any arguments after the second are ignored.
+
+PROMPT_HISTORY.md is resolved relative to the current working directory, so
+run the script from the repository root. The file is never created: if it is
+missing the script prints a message and exits 1. It also exits 1 (after
+printing usage) when no paraphrase argument is given, and exits 0 after a
+successful append. A blank line is written before each entry.
 """
 import sys
 import datetime

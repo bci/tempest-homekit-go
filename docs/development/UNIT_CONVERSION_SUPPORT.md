@@ -406,7 +406,7 @@ Use whatever feels natural:
 
 - [Alarm Editor Enhancements](../../pkg/alarm/docs/ALARM_EDITOR_ENHANCEMENTS.md) - UI features
 - [Tag Selector Feature](./TAG_SELECTOR_FEATURE.md) - Tag management
-- [Example Alarms](../../example-alarms.json) - Sample configurations
+- [Example Alarms](../../examples/example-alarms.json) - Sample configurations
 
 ##  Summary
 

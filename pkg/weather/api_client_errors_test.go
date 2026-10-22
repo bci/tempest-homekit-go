@@ -7,11 +7,15 @@ import (
 	"testing"
 )
 
-// small transport helper to route any request to the test server
+// rt is a small transport helper to route any request to the test server: an http.RoundTripper backed by a plain function.
 type rt func(*http.Request) (*http.Response, error)
 
+// RoundTrip calls f.
 func (f rt) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
+// overrideTransportToTestServer replaces http.DefaultTransport with one that
+// sends every request to srv, keeping the path and query, and returns a
+// function that restores the original transport.
 func overrideTransportToTestServer(srv *httptest.Server) func() {
 	old := http.DefaultTransport
 	target, _ := url.Parse(srv.URL)
@@ -25,6 +29,7 @@ func overrideTransportToTestServer(srv *httptest.Server) func() {
 	return func() { http.DefaultTransport = old }
 }
 
+// TestGetStations_Non200 checks that GetStations fails on an HTTP 500.
 func TestGetStations_Non200(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -40,6 +45,7 @@ func TestGetStations_Non200(t *testing.T) {
 	}
 }
 
+// TestGetHistoricalObservationsWithProgress_StationDetailsError checks that a failed station details lookup is returned as an error.
 func TestGetHistoricalObservationsWithProgress_StationDetailsError(t *testing.T) {
 	// Server returns 500 for station details
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -56,6 +62,7 @@ func TestGetHistoricalObservationsWithProgress_StationDetailsError(t *testing.T)
 	}
 }
 
+// TestParseDeviceObservations_SkipsIncomplete checks that rows shorter than 18 values are dropped.
 func TestParseDeviceObservations_SkipsIncomplete(t *testing.T) {
 	// Provide an incomplete observation (less than 18 elements)
 	incomplete := [][]interface{}{

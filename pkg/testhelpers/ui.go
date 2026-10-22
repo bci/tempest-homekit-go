@@ -21,6 +21,17 @@ import (
 // asserts the synthesized popout has the main data at datasets[0] (same length
 // as dashboard main dataset) and the average dashed two-point horizontal line
 // at datasets[1]. This is exported so other UI tests can reuse it.
+//
+// Unlike the pkg/web helper of the same name, this version does not rely on the
+// real popout page. It builds a chart config from charts.<chartType> in the
+// current page (falling back to a minimal config if that is unavailable), fetches
+// /api/status from ts on the Go side, and then synthesises window.charts.popout
+// in-page with injected JavaScript: one dataset per config entry over the
+// history values, plus a dashed two-point "Average" dataset at index 1 when the
+// config has none. Only if that injection fails does it navigate to
+// /chart/<chartType>. The assertions therefore check the injected chart and
+// mostly reduce to the /api/status history length equalling expectedDashLen.
+// Failures are reported with t.Fatalf.
 func AssertPopoutDatasetOrdering(t *testing.T, browserCtx context.Context, ts *httptest.Server, chartType string, expectedDashLen int) {
 	// Build cfg JSON in-page from charts.<chartType> metadata
 	// create a simple Title-case for the chart title (avoid deprecated strings.Title)

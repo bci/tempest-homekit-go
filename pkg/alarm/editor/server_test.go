@@ -10,6 +10,8 @@ import (
 	"testing"
 )
 
+// TestNewServer checks that NewServer strips the "@" prefix from the config
+// path, loads the existing config file and stores the port it was given.
 func TestNewServer(t *testing.T) {
 	// Create a temporary config file
 	tmpfile, err := os.CreateTemp("", "alarms_test_*.json")
@@ -55,6 +57,8 @@ func TestNewServer(t *testing.T) {
 	}
 }
 
+// TestHandleGetConfig checks that handleGetConfig returns the in-memory
+// configuration as JSON.
 func TestHandleGetConfig(t *testing.T) {
 	// Create test server
 	config := &alarm.AlarmConfig{
@@ -96,6 +100,8 @@ func TestHandleGetConfig(t *testing.T) {
 	}
 }
 
+// TestHandleListAlarms checks handleListAlarms with no filter, a name filter
+// and a tag filter.
 func TestHandleListAlarms(t *testing.T) {
 	config := &alarm.AlarmConfig{
 		Alarms: []alarm.Alarm{
@@ -164,6 +170,8 @@ func TestHandleListAlarms(t *testing.T) {
 	}
 }
 
+// TestHandleGetTags checks that handleGetTags returns the de-duplicated,
+// sorted union of the alarms' tags.
 func TestHandleGetTags(t *testing.T) {
 	config := &alarm.AlarmConfig{
 		Alarms: []alarm.Alarm{
@@ -228,6 +236,8 @@ func TestHandleGetTags(t *testing.T) {
 	}
 }
 
+// TestHandleGetTags_WithPredefinedTags checks that tags from the TAG_LIST
+// environment variable are merged with alarm tags.
 func TestHandleGetTags_WithPredefinedTags(t *testing.T) {
 	// Set up environment with predefined tags
 	originalTagList := os.Getenv("TAG_LIST")
@@ -296,6 +306,8 @@ func TestHandleGetTags_WithPredefinedTags(t *testing.T) {
 	}
 }
 
+// TestHandleValidate table-tests handleValidate's valid/invalid verdict for
+// well-formed and malformed conditions.
 func TestHandleValidate(t *testing.T) {
 	server := &Server{
 		configPath: "test.json",
@@ -355,6 +367,8 @@ func TestHandleValidate(t *testing.T) {
 	}
 }
 
+// TestHandleGetFields checks that handleGetFields returns a non-empty list
+// including common condition fields.
 func TestHandleGetFields(t *testing.T) {
 	server := &Server{
 		configPath: "test.json",
@@ -387,6 +401,8 @@ func TestHandleGetFields(t *testing.T) {
 	}
 }
 
+// TestLoadContacts_ValidJSON checks that loadContacts parses a valid
+// CONTACT_LIST JSON array.
 func TestLoadContacts_ValidJSON(t *testing.T) {
 	// Set up environment with valid contact list
 	originalContactList := os.Getenv("CONTACT_LIST")
@@ -413,6 +429,8 @@ func TestLoadContacts_ValidJSON(t *testing.T) {
 	}
 }
 
+// TestLoadContacts_InvalidJSON checks that loadContacts returns an error for
+// malformed CONTACT_LIST JSON.
 func TestLoadContacts_InvalidJSON(t *testing.T) {
 	// Set up environment with invalid JSON
 	originalContactList := os.Getenv("CONTACT_LIST")
@@ -432,6 +450,8 @@ func TestLoadContacts_InvalidJSON(t *testing.T) {
 	}
 }
 
+// TestLoadContacts_ValidationWarnings checks that contacts with missing or
+// malformed fields are still loaded (they only produce warnings).
 func TestLoadContacts_ValidationWarnings(t *testing.T) {
 	// Set up environment with contacts that should generate warnings
 	originalContactList := os.Getenv("CONTACT_LIST")
@@ -463,6 +483,8 @@ func TestLoadContacts_ValidationWarnings(t *testing.T) {
 	// - Contact 4: SMS without + prefix
 }
 
+// TestHandleGetTags_InvalidJSON checks that malformed TAG_LIST JSON is ignored
+// and alarm tags are still returned.
 func TestHandleGetTags_InvalidJSON(t *testing.T) {
 	// Set up environment with invalid TAG_LIST JSON
 	originalTagList := os.Getenv("TAG_LIST")
@@ -501,6 +523,8 @@ func TestHandleGetTags_InvalidJSON(t *testing.T) {
 	}
 }
 
+// TestHandleGetTags_ValidationWarnings checks that empty TAG_LIST entries are
+// dropped while tags that only warn (spaces, over 50 characters) are kept.
 func TestHandleGetTags_ValidationWarnings(t *testing.T) {
 	// Set up environment with TAG_LIST that should generate warnings
 	originalTagList := os.Getenv("TAG_LIST")
@@ -571,6 +595,8 @@ func TestHandleGetTags_ValidationWarnings(t *testing.T) {
 	// - Tag 4: very long
 }
 
+// TestHandleGetTags_ValidJSON checks that a valid TAG_LIST is merged with
+// alarm tags into one sorted, de-duplicated list.
 func TestHandleGetTags_ValidJSON(t *testing.T) {
 	// Set up environment with valid TAG_LIST JSON
 	originalTagList := os.Getenv("TAG_LIST")
@@ -635,6 +661,8 @@ func TestHandleGetTags_ValidJSON(t *testing.T) {
 	}
 }
 
+// TestHandleGetContacts_SortedAlphabetically checks that handleGetContacts
+// returns contacts sorted by name.
 func TestHandleGetContacts_SortedAlphabetically(t *testing.T) {
 	// Create server with contacts in non-alphabetical order
 	server := &Server{

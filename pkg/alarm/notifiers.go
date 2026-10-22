@@ -29,27 +29,37 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
+// Package-level state shared by the notifiers.
 var (
-	// appStartTime tracks when the application started
+	// appStartTime tracks when the application started (strictly, when this
+	// package was initialised); it is the basis of the uptime shown by
+	// {{app_info}}.
 	appStartTime = time.Now()
 )
 
-// Notifier interface for sending notifications
+// Notifier interface for sending notifications. Send expands the channel's
+// template(s) for alarm, obs and stationName and delivers the result to one
+// destination, returning an error if delivery fails.
 type Notifier interface {
 	Send(alarm *Alarm, channel *Channel, obs *weather.Observation, stationName string) error
 }
 
-// NotifierFactory creates notifiers for different channel types
+// NotifierFactory creates notifiers for different channel types, handing
+// each one the global provider settings it needs from config.
 type NotifierFactory struct {
 	config *AlarmConfig
 }
 
-// NewNotifierFactory creates a new notifier factory
+// NewNotifierFactory creates a new notifier factory bound to config. config
+// must be non-nil; [NotifierFactory.GetNotifier] reads its Email, SMS and
+// Syslog fields.
 func NewNotifierFactory(config *AlarmConfig) *NotifierFactory {
 	return &NotifierFactory{config: config}
 }
 
-// GetNotifier returns a notifier for the given channel type
+// GetNotifier returns a notifier for the given channel type (console, syslog,
+// oslog, eventlog, email, sms, webhook, csv or json). A fresh notifier is
+// built on each call. It returns an error for any other type.
 func (f *NotifierFactory) GetNotifier(channelType string) (Notifier, error) {
 	switch channelType {
 	case "console":
@@ -75,20 +85,29 @@ func (f *NotifierFactory) GetNotifier(channelType string) (Notifier, error) {
 	}
 }
 
-// ConsoleNotifier sends notifications to console/stdout
+// ConsoleNotifier sends notifications to console/stdout through logger.Alarm.
 type ConsoleNotifier struct{}
 
+// Send expands channel.Template and writes it with logger.Alarm. It never
+// returns an error.
 func (n *ConsoleNotifier) Send(alarm *Alarm, channel *Channel, obs *weather.Observation, stationName string) error {
 	message := expandTemplate(channel.Template, alarm, obs, stationName)
 	logger.Alarm("%s", message)
 	return nil
 }
 
-// SyslogNotifier sends notifications to syslog
+// SyslogNotifier sends notifications to syslog, either the local daemon or a
+// remote server described by config (which may be nil).
 type SyslogNotifier struct {
 	config *SyslogConfig
 }
 
+// Send expands channel.Template and writes it to syslog. It dials the remote
+// server when config has both Network and Address, otherwise the local daemon
+// with tag "tempest-weather". A new connection is opened and closed per
+// message. The configured Priority is passed when opening the writer, but the
+// message itself is always written at warning severity. It returns an error
+// if syslog cannot be reached or the write fails.
 func (n *SyslogNotifier) Send(alarm *Alarm, channel *Channel, obs *weather.Observation, stationName string) error {
 	message := expandTemplate(channel.Template, alarm, obs, stationName)
 
@@ -125,9 +144,13 @@ func (n *SyslogNotifier) Send(alarm *Alarm, channel *Channel, obs *weather.Obser
 	return writer.Warning(message)
 }
 
-// EventLogNotifier sends notifications to system event log (Windows) or syslog (Unix)
+// EventLogNotifier sends notifications to system event log (Windows) or syslog (Unix).
 type EventLogNotifier struct{}
 
+// Send expands channel.Template and delivers it. On Windows it currently only
+// logs the message through logger.Info (no real Event Log write); elsewhere it
+// writes to the local syslog at warning severity with tag "tempest-weather".
+// It returns an error if syslog cannot be reached or the write fails.
 func (n *EventLogNotifier) Send(alarm *Alarm, channel *Channel, obs *weather.Observation, stationName string) error {
 	message := expandTemplate(channel.Template, alarm, obs, stationName)
 
@@ -147,11 +170,18 @@ func (n *EventLogNotifier) Send(alarm *Alarm, channel *Channel, obs *weather.Obs
 	return writer.Warning(message)
 }
 
-// EmailNotifier sends email notifications
+// EmailNotifier sends email notifications using the global provider settings
+// in config (SMTP or Microsoft 365).
 type EmailNotifier struct {
 	config *EmailGlobalConfig
 }
 
+// Send expands the subject and body templates (falling back to
+// channel.Template when Email.Body is empty), prepends a "To: ..." line to the
+// body, and sends it via SMTP or, for Microsoft 365 with OAuth2, the Graph
+// API; Microsoft 365 without OAuth2 falls back to SMTP. It returns an error if
+// the channel or global email config is missing, the provider is unknown, or
+// delivery fails.
 func (n *EmailNotifier) Send(alarm *Alarm, channel *Channel, obs *weather.Observation, stationName string) error {
 	if channel.Email == nil {
 		return fmt.Errorf("email configuration missing for channel")
@@ -219,6 +249,12 @@ func (n *EmailNotifier) Send(alarm *Alarm, channel *Channel, obs *weather.Observ
 	}
 }
 
+// sendSMTP delivers a pre-built RFC 5322 message to the envelope recipients in
+// to, using PLAIN auth. With UseTLS, port 465 uses implicit TLS and any other
+// port uses STARTTLS (which must succeed); without UseTLS it uses
+// smtp.SendMail, which still upgrades opportunistically. Username and password
+// undergo environment-variable expansion. Errors from any SMTP step are
+// returned wrapped with that step's name.
 func (n *EmailNotifier) sendSMTP(to []string, msg []byte) error {
 	// Get credentials from config (with environment variable expansion)
 	username := os.ExpandEnv(n.config.Username)
@@ -330,6 +366,13 @@ func (n *EmailNotifier) sendSMTP(to []string, msg []byte) error {
 	return smtp.SendMail(addr, auth, n.config.FromAddress, to, msg)
 }
 
+// sendMicrosoft365 sends the message through the Microsoft Graph sendMail API
+// using client-credential (app-only) auth, so the app registration needs the
+// Mail.Send application permission. The mail is sent as the user named by
+// FromAddress, which must be a user principal name in the tenant, and is not
+// saved to Sent Items. Credentials undergo environment-variable expansion. It
+// returns an error if credentials or the from address are missing, or if
+// authentication or sending fails.
 func (n *EmailNotifier) sendMicrosoft365(emailConfig *EmailConfig, subject, body string) error {
 	// Get credentials from environment (expand environment variables)
 	clientID := os.ExpandEnv(n.config.ClientID)
@@ -447,11 +490,15 @@ func (n *EmailNotifier) sendMicrosoft365(emailConfig *EmailConfig, subject, body
 	return nil
 }
 
-// SMSNotifier sends SMS notifications
+// SMSNotifier sends SMS notifications using the global provider settings in
+// config (Twilio or AWS SNS).
 type SMSNotifier struct {
 	config *SMSGlobalConfig
 }
 
+// Send expands channel.SMS.Message and sends it to every recipient via the
+// configured provider. It returns an error if the channel or global SMS config
+// is missing, the provider is unknown, or every recipient failed.
 func (n *SMSNotifier) Send(alarm *Alarm, channel *Channel, obs *weather.Observation, stationName string) error {
 	if channel.SMS == nil {
 		return fmt.Errorf("SMS configuration missing for channel")
@@ -474,6 +521,12 @@ func (n *SMSNotifier) Send(alarm *Alarm, channel *Channel, obs *weather.Observat
 	}
 }
 
+// sendAWSSNS sends message through AWS SNS using only the static credentials
+// from config (no shared-credentials file or IAM role fallback). Without a
+// topic ARN it sends a direct SMS to each number in smsConfig.To; with one it
+// publishes to the topic once per entry in To. It returns an error only if
+// credentials are missing, the AWS config cannot load, or every publish
+// failed; partial failures are logged.
 func (n *SMSNotifier) sendAWSSNS(smsConfig *SMSConfig, message string) error {
 	// Get credentials from config (with environment variable expansion)
 	accessKey := os.ExpandEnv(n.config.AWSAccessKey)
@@ -552,6 +605,10 @@ func (n *SMSNotifier) sendAWSSNS(smsConfig *SMSConfig, message string) error {
 	return nil
 }
 
+// sendTwilio sends message to each number in smsConfig.To through the Twilio
+// Messages REST API with a 10-second timeout per request. It returns an error
+// only if credentials are missing or every recipient failed; partial failures
+// are logged with a warning.
 func (n *SMSNotifier) sendTwilio(smsConfig *SMSConfig, message string) error {
 	// Get credentials from config (with environment variable expansion)
 	accountSID := os.ExpandEnv(n.config.AccountSID)
@@ -625,9 +682,13 @@ func (n *SMSNotifier) sendTwilio(smsConfig *SMSConfig, message string) error {
 	return nil
 }
 
-// WebhookNotifier sends webhook notifications
+// WebhookNotifier sends webhook notifications as HTTP requests.
 type WebhookNotifier struct{}
 
+// Send expands channel.Webhook.Body and sends it to the configured URL with
+// the configured method, Content-Type and extra headers, with a 10-second
+// timeout. It returns an error if the request cannot be built or sent, or if
+// the response status is not 2xx (including the response body in the error).
 func (n *WebhookNotifier) Send(alarm *Alarm, channel *Channel, obs *weather.Observation, stationName string) error {
 	if channel.Webhook == nil {
 		return fmt.Errorf("webhook configuration missing for channel")
@@ -668,9 +729,12 @@ func (n *WebhookNotifier) Send(alarm *Alarm, channel *Channel, obs *weather.Obse
 	return nil
 }
 
-// CSVNotifier writes alarm notifications to CSV files
+// CSVNotifier writes alarm notifications to CSV files.
 type CSVNotifier struct{}
 
+// Send expands channel.CSV.Message and appends it as a row to the configured
+// CSV file. It returns an error if the CSV config is missing or the write
+// fails.
 func (n *CSVNotifier) Send(alarm *Alarm, channel *Channel, obs *weather.Observation, stationName string) error {
 	if channel.CSV == nil {
 		return fmt.Errorf("CSV configuration missing for channel")
@@ -682,9 +746,12 @@ func (n *CSVNotifier) Send(alarm *Alarm, channel *Channel, obs *weather.Observat
 	return n.appendToCSVFile(channel.CSV.Path, message, channel.CSV.MaxDays)
 }
 
-// JSONNotifier writes alarm notifications to JSON files
+// JSONNotifier writes alarm notifications to JSON files.
 type JSONNotifier struct{}
 
+// Send expands channel.JSON.Message and appends it as a record to the
+// configured JSON array file. It returns an error if the JSON config is
+// missing or the write fails.
 func (n *JSONNotifier) Send(alarm *Alarm, channel *Channel, obs *weather.Observation, stationName string) error {
 	if channel.JSON == nil {
 		return fmt.Errorf("JSON configuration missing for channel")
@@ -696,7 +763,15 @@ func (n *JSONNotifier) Send(alarm *Alarm, channel *Channel, obs *weather.Observa
 	return n.appendToJSONFile(channel.JSON.Path, message, channel.JSON.MaxDays)
 }
 
-// appendToCSVFile appends a message to a CSV file with rotation
+// appendToCSVFile appends a message to a CSV file with rotation.
+//
+// The file is first rotated if older than maxDays (rotation errors are only
+// logged). If filePath cannot be opened, filePath+".tmp" is used instead. A
+// header row is written to an empty file: the 11-column default header when
+// the message contains a comma, otherwise "timestamp,message". Each row starts
+// with the local time; a comma-separated message is parsed as one CSV record
+// and its fields appended, otherwise the message is a single field. It returns
+// an error if neither file can be opened or a write fails.
 func (n *CSVNotifier) appendToCSVFile(filePath string, message string, maxDays int) error {
 	// Check if file needs rotation
 	if maxDays > 0 {
@@ -779,7 +854,13 @@ func (n *CSVNotifier) appendToCSVFile(filePath string, message string, maxDays i
 	return nil
 }
 
-// appendToJSONFile appends a message to a JSON file with rotation
+// appendToJSONFile appends a message to a JSON file with rotation.
+//
+// The file holds a JSON array of {"timestamp", "message"} objects. It is read
+// whole, its closing "\n]" stripped, and rewritten with the new record added,
+// so the write is not atomic. It returns an error if the file cannot be read
+// or written, or if existing content does not end with "\n]" (the format this
+// function writes).
 func (n *JSONNotifier) appendToJSONFile(filePath string, message string, maxDays int) error {
 	// Check if file needs rotation
 	if maxDays > 0 {
@@ -844,7 +925,10 @@ func (n *JSONNotifier) appendToJSONFile(filePath string, message string, maxDays
 	return nil
 }
 
-// rotateFileIfNeeded rotates a file if it's older than maxDays
+// rotateFileIfNeeded rotates a file if it's older than maxDays, renaming it to
+// filePath.<YYYY-MM-DD_HH-MM-SS>.bak. Age is measured from the file's
+// modification time, which every append refreshes. A missing file or
+// maxDays <= 0 is a no-op. It returns an error if stat or rename fails.
 func rotateFileIfNeeded(filePath string, maxDays int) error {
 	if maxDays <= 0 {
 		return nil // No rotation needed
@@ -877,7 +961,9 @@ func rotateFileIfNeeded(filePath string, maxDays int) error {
 	return nil
 }
 
-// formatNumber formats a number with thousands separator
+// formatNumber formats a number with thousands separator, rounding to an
+// integer (1234567.8 becomes "1,234,568"). Negative values are not handled
+// correctly (for example -123 becomes "-,123").
 func formatNumber(n float64) string {
 	s := fmt.Sprintf("%.0f", n)
 	if len(s) <= 3 {
@@ -894,7 +980,9 @@ func formatNumber(n float64) string {
 	return result.String()
 }
 
-// formatAppInfo returns formatted application information
+// formatAppInfo returns formatted application information for {{app_info}}:
+// app version, uptime since appStartTime and Go version, as an HTML <div> when
+// isHTML is true or a single plain-text line otherwise.
 func formatAppInfo(isHTML bool) string {
 	uptime := time.Since(appStartTime)
 	days := int(uptime.Hours() / 24)
@@ -920,7 +1008,10 @@ func formatAppInfo(isHTML bool) string {
 		appVersion, uptimeStr, runtime.Version())
 }
 
-// formatAlarmInfo returns formatted alarm information
+// formatAlarmInfo returns formatted alarm information for {{alarm_info}}:
+// name, description, condition, status, cooldown (whole hours or minutes when
+// large enough), trigger count and tags, as an HTML table when isHTML is true
+// or newline-separated text otherwise. Values are not HTML-escaped.
 func formatAlarmInfo(alarm *Alarm, isHTML bool) string {
 	enabledStr := "enabled"
 	if !alarm.Enabled {
@@ -956,11 +1047,18 @@ func formatAlarmInfo(alarm *Alarm, isHTML bool) string {
 		alarm.Name, alarm.Description, alarm.Condition, enabledStr, cooldownStr, alarm.TriggeredCount, tagsStr)
 }
 
-// formatSensorInfo returns formatted sensor information
+// formatSensorInfo returns formatted sensor information without previous
+// values (every "Last" column shows N/A).
 func formatSensorInfo(obs *weather.Observation, isHTML bool) string {
 	return formatSensorInfoWithAlarm(obs, nil, isHTML)
 }
 
+// formatSensorInfoWithAlarm returns the {{sensor_info}} block: current
+// readings (with imperial conversions and a cardinal wind direction) plus each
+// field's last value from alarm, taken from its trigger context when present
+// and otherwise from its previous values. alarm may be nil, which shows N/A.
+// In HTML mode it renders a table and highlights rows whose value moved by
+// more than a per-field threshold. obs must be non-nil.
 func formatSensorInfoWithAlarm(obs *weather.Observation, alarm *Alarm, isHTML bool) string {
 	tempF := obs.AirTemperature*9/5 + 32
 	windSpeedMph := obs.WindAvg * 2.23694
@@ -1109,7 +1207,18 @@ Lightning: %d strikes [Last: %s strikes]`,
 		obs.LightningStrikeCount, getPrevValue("lightning_count", float64(obs.LightningStrikeCount), "%.0f"))
 }
 
-// expandTemplate replaces template variables with actual values
+// expandTemplate replaces template variables with actual values.
+//
+// Placeholders are {{name}} tokens: current readings (temperature,
+// temperature_f, temperature_c, humidity, pressure, wind_speed, wind_gust,
+// wind_direction, lux, uv, rain_rate, rain_daily, lightning_count,
+// lightning_distance), context (timestamp, station, alarm_name,
+// alarm_description, alarm_condition, message), composite blocks (app_info,
+// alarm_info, sensor_info) and last_<field> values for change comparisons
+// ("N/A" when unknown). Composite blocks render as HTML when the template
+// contains common HTML tags. Unknown placeholders are left as-is. Values are
+// inserted verbatim (no JSON, CSV or HTML escaping), and {{rain_daily}}
+// currently shows RainAccumulated. alarm and obs must be non-nil.
 func expandTemplate(template string, alarm *Alarm, obs *weather.Observation, stationName string) string {
 	result := template
 

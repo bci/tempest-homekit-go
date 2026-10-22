@@ -6,6 +6,7 @@ import (
 	"time"
 )
 
+// TestProcessObservationAirAddsObservation checks that one obs_air datagram adds one observation with the sent temperature.
 func TestProcessObservationAirAddsObservation(t *testing.T) {
 	l := NewUDPListener(10)
 
@@ -39,6 +40,7 @@ func TestProcessObservationAirAddsObservation(t *testing.T) {
 	}
 }
 
+// TestProcessObservationSkyAddsObservation checks that an obs_sky row with a null local_rain field still adds an observation with the sent lux and UV.
 func TestProcessObservationSkyAddsObservation(t *testing.T) {
 	l := NewUDPListener(10)
 

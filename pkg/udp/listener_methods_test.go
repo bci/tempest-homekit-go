@@ -8,6 +8,7 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
+// TestProcessDeviceStatusSetsDeviceStatus checks that a device_status datagram populates GetDeviceStatus.
 func TestProcessDeviceStatusSetsDeviceStatus(t *testing.T) {
 	l := NewUDPListener(100)
 
@@ -31,6 +32,7 @@ func TestProcessDeviceStatusSetsDeviceStatus(t *testing.T) {
 	}
 }
 
+// TestProcessHubStatusSetsHubStatus checks that a hub_status datagram populates GetHubStatus.
 func TestProcessHubStatusSetsHubStatus(t *testing.T) {
 	l := NewUDPListener(100)
 
@@ -54,6 +56,7 @@ func TestProcessHubStatusSetsHubStatus(t *testing.T) {
 	}
 }
 
+// TestAddObservationRollOverAndGetLatestCopy checks history rollover at maxHistorySize and that GetLatestObservation returns a copy.
 func TestAddObservationRollOverAndGetLatestCopy(t *testing.T) {
 	l := NewUDPListener(100)
 	// set a small maxHistorySize to test rollover
@@ -84,6 +87,7 @@ func TestAddObservationRollOverAndGetLatestCopy(t *testing.T) {
 	}
 }
 
+// createObs returns an observation whose timestamp and air temperature are both ts.
 func createObs(ts int64) *weather.Observation {
 	return &weather.Observation{Timestamp: ts, AirTemperature: float64(ts)}
 }

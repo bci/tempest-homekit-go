@@ -16,6 +16,9 @@ func createTestServer(t *testing.T) *WebServer {
 	return testNewWebServer(t)
 }
 
+// TestWeatherAndStatusEndpoints feeds observations out of order and checks
+// that /api/weather returns data and /api/status returns history in
+// chronological order with non-negative incremental rain.
 func TestWeatherAndStatusEndpoints(t *testing.T) {
 	ws := createTestServer(t)
 

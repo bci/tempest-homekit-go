@@ -1,4 +1,11 @@
 // Package status provides a curses-based terminal UI for monitoring the Tempest HomeKit service.
+//
+// RunStatusConsole starts the full service in the background, captures the
+// standard log package's output into an in-memory LogBuffer, and draws a
+// tview/tcell dashboard (console logs, sensor readings, station, alarm, HomeKit
+// and system panels) that it refreshes by polling the service's own web API on
+// localhost. The package also provides themed color schemes for the terminal UI
+// (see Theme, GetTheme and ListThemes).
 package status
 
 import (
@@ -20,14 +27,23 @@ import (
 	"github.com/rivo/tview"
 )
 
-// LogBuffer is a thread-safe circular buffer for capturing log messages
+// LogBuffer is a thread-safe circular buffer for capturing log messages. It keeps
+// at most maxSize lines, dropping the oldest when full. It is safe for concurrent
+// use.
+//
+// Fields:
+//
+//   - mu guards lines.
+//   - lines holds the captured lines, oldest first, with ANSI escapes removed.
+//   - maxSize is the maximum number of lines retained.
 type LogBuffer struct {
 	mu      sync.Mutex
 	lines   []string
 	maxSize int
 }
 
-// NewLogBuffer creates a new log buffer with the specified maximum size
+// NewLogBuffer creates a new log buffer with the specified maximum size, the
+// number of lines it retains.
 func NewLogBuffer(maxSize int) *LogBuffer {
 	return &LogBuffer{
 		lines:   make([]string, 0, maxSize),
@@ -35,7 +51,10 @@ func NewLogBuffer(maxSize int) *LogBuffer {
 	}
 }
 
-// Write implements io.Writer interface for capturing log output
+// Write implements io.Writer interface for capturing log output. It splits p into
+// lines, drops empty lines, strips ANSI color codes and appends each line,
+// evicting the oldest when the buffer is full. It always reports len(p) bytes
+// written and a nil error.
 func (lb *LogBuffer) Write(p []byte) (n int, err error) {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
@@ -59,7 +78,8 @@ func (lb *LogBuffer) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
-// GetLines returns a copy of all stored log lines
+// GetLines returns a copy of all stored log lines, oldest first; the caller may
+// modify the returned slice.
 func (lb *LogBuffer) GetLines() []string {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
@@ -68,7 +88,9 @@ func (lb *LogBuffer) GetLines() []string {
 	return result
 }
 
-// stripANSI removes ANSI escape sequences from a string
+// stripANSI removes ANSI escape sequences from a string. It treats everything from
+// an ESC character up to and including the next ASCII letter as one sequence,
+// which covers the SGR color codes the logger emits.
 func stripANSI(s string) string {
 	// Simple ANSI stripper - removes escape sequences
 	result := ""
@@ -89,7 +111,23 @@ func stripANSI(s string) string {
 	return result
 }
 
-// RunStatusConsole starts the curses-based status console
+// RunStatusConsole starts the curses-based status console and blocks until the
+// user quits or the configured timeout expires.
+//
+// It redirects the standard log package's output into a pipe drained by a
+// LogBuffer (so tview, which owns the terminal, is not overwritten), starts
+// service.StartService(cfg, version) in a goroutine, waits two seconds for it
+// to initialise, and then runs the tview application. Panels are refreshed every
+// cfg.StatusRefresh seconds by polling /api/weather, /api/status and
+// /api/alarm-status on http://localhost:cfg.WebPort; data is fetched and
+// formatted off the event loop and only the SetText calls are queued onto it.
+// Keys: q/Esc/Ctrl-C quit, r/Ctrl-L refresh now, t cycles cfg.StatusTheme
+// through the available themes. If cfg.StatusTimeout is positive the console
+// stops itself after that many seconds.
+//
+// The log output is restored to os.Stderr on return. The background service
+// goroutine is not stopped. It returns an error only if the tview application
+// fails to run.
 func RunStatusConsole(cfg *config.Config, version string) error {
 	// Get theme (mutable for theme cycling)
 	currentThemeName := cfg.StatusTheme
@@ -611,7 +649,10 @@ func RunStatusConsole(cfg *config.Config, version string) error {
 	return nil
 }
 
-// fetchStatus fetches JSON data from the given URL
+// fetchStatus fetches JSON data from the given URL and decodes it as a JSON object.
+// It uses a 500 ms timeout so a slow service cannot stall the UI. It returns an
+// error if the request, the body read or the JSON decoding fails; the HTTP status
+// code is not checked.
 func fetchStatus(url string) (map[string]interface{}, error) {
 	client := &http.Client{Timeout: 500 * time.Millisecond}
 	resp, err := client.Get(url)

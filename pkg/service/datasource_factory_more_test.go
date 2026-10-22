@@ -10,9 +10,12 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
-// fakeUDPListener implements weather.UDPListener for tests
+// fakeUDPListener implements weather.UDPListener for tests with no-op methods and
+// an already-closed observation channel. This file is excluded by its ignore
+// build tag and predates the current four-argument CreateDataSource signature.
 type fakeUDPListener struct{}
 
+// Start is a no-op that returns nil.
 func (f *fakeUDPListener) Start() error                               { return nil }
 func (f *fakeUDPListener) Stop() error                                { return nil }
 func (f *fakeUDPListener) GetLatestObservation() *weather.Observation { return nil }
@@ -27,6 +30,7 @@ func (f *fakeUDPListener) ObservationChannel() <-chan weather.Observation {
 	return ch
 }
 
+// TestCreateDataSource_UDP_Success checks that UDP mode with a listener yields a UDP data source.
 func TestCreateDataSource_UDP_Success(t *testing.T) {
 	cfg := &config.Config{UDPStream: true, DisableInternet: true}
 	var st *weather.Station = &weather.Station{StationID: 123, StationName: "Test"}
@@ -40,6 +44,7 @@ func TestCreateDataSource_UDP_Success(t *testing.T) {
 	}
 }
 
+// TestCreateDataSource_CustomURL checks that a custom station URL yields a custom-URL data source.
 func TestCreateDataSource_CustomURL(t *testing.T) {
 	cfg := &config.Config{StationURL: "http://example/custom"}
 	st := &weather.Station{StationID: 10, StationName: "S"}
@@ -53,6 +58,7 @@ func TestCreateDataSource_CustomURL(t *testing.T) {
 	}
 }
 
+// TestCreateDataSource_Generated checks that generated-weather mode yields a generated data source without a station.
 func TestCreateDataSource_Generated(t *testing.T) {
 	cfg := &config.Config{UseGeneratedWeather: true, WebPort: "7777", GeneratedWeatherPath: "/mygen"}
 	ds, err := CreateDataSource(cfg, nil, nil)
@@ -64,6 +70,7 @@ func TestCreateDataSource_Generated(t *testing.T) {
 	}
 }
 
+// TestCreateDataSource_DefaultNoStationError checks that the default API mode fails without a station.
 func TestCreateDataSource_DefaultNoStationError(t *testing.T) {
 	cfg := &config.Config{}
 	ds, err := CreateDataSource(cfg, nil, nil)

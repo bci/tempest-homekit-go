@@ -1,12 +1,26 @@
 /* eslint-env jest */
+/**
+ * @module update-alarm-status.integration.test
+ * @description Integration tests for the real ../script.js updateAlarmStatus: how
+ * the tag <select> it renders resolves URL vs persisted tag.
+ */
 const path = require('path');
 const { JSDOM } = require('jsdom');
 
+/**
+ * Tag selection on first render of the alarm list.
+ */
 describe('updateAlarmStatus integration (real script)', () => {
+  /** Absolute path of the dashboard script under test. @type {string} */
   const scriptPath = path.resolve(__dirname, '../script.js');
 
+  /** Globals saved before each test so afterEach can restore them. */
   let _origWindow, _origDocument, _origLocalStorage, _origFetch;
 
+  /**
+   * Restores (or deletes) the window/document/localStorage/fetch globals and clears
+   * the module registry.
+   */
   afterEach(() => {
     // Restore any globals we overwrote
     if (typeof _origWindow !== 'undefined') global.window = _origWindow; else delete global.window;
@@ -16,6 +30,9 @@ describe('updateAlarmStatus integration (real script)', () => {
     jest.resetModules();
   });
 
+  /**
+   * With ?tag=indoor and 'outdoor' persisted, the select shows 'indoor'.
+   */
   test('URL tag param takes precedence over persisted localStorage', () => {
     const dom = new JSDOM('<!doctype html><html><body><div id="alarm-list"><div class="alarm-list-header">Active Alarms</div></div></body></html>', { url: 'http://localhost/?tag=indoor' });
     const { window } = dom;
@@ -54,6 +71,9 @@ describe('updateAlarmStatus integration (real script)', () => {
     expect(sel.value).toBe('indoor');
   });
 
+  /**
+   * With no tag param, the persisted 'garage' is selected and added to the URL.
+   */
   test('Persisted tag applied and URL updated when no tag param', () => {
     const dom = new JSDOM('<!doctype html><html><body><div id="alarm-list"><div class="alarm-list-header">Active Alarms</div></div></body></html>', { url: 'http://localhost/' });
     const { window } = dom;

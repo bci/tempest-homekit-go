@@ -6,6 +6,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 )
 
+// TestGetTheme checks that GetTheme returns a non-nil theme for known, unknown and empty names.
 func TestGetTheme(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -35,6 +36,7 @@ func TestGetTheme(t *testing.T) {
 	}
 }
 
+// TestGetAllThemeNames checks that exactly the 12 expected theme names are listed.
 func TestGetAllThemeNames(t *testing.T) {
 	names := GetAllThemeNames()
 
@@ -63,6 +65,7 @@ func TestGetAllThemeNames(t *testing.T) {
 	}
 }
 
+// TestGetNextTheme checks that theme cycling advances in order and wraps around.
 func TestGetNextTheme(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -90,6 +93,7 @@ func TestGetNextTheme(t *testing.T) {
 	}
 }
 
+// TestGetLogLevelColor checks the color chosen for each log level spelling.
 func TestGetLogLevelColor(t *testing.T) {
 	theme := GetTheme("dark-ocean")
 	if theme == nil {
@@ -118,6 +122,7 @@ func TestGetLogLevelColor(t *testing.T) {
 	}
 }
 
+// TestColorizeLogLine checks that log lines are wrapped in the color tag for their level, or left unchanged.
 func TestColorizeLogLine(t *testing.T) {
 	theme := GetTheme("dark-ocean")
 	if theme == nil {
@@ -149,6 +154,7 @@ func TestColorizeLogLine(t *testing.T) {
 	}
 }
 
+// TestThemeStructure checks that the default theme has a name, description and non-default colors for every role.
 func TestThemeStructure(t *testing.T) {
 	theme := GetTheme("dark-ocean")
 	if theme == nil {

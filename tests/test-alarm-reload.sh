@@ -1,6 +1,18 @@
 #!/bin/bash
 
 # Test script to verify alarm config reload shows detailed logging
+#
+# Starts the app on web port 8083 with --alarms @tempest-alarms.json, touches
+# tempest-alarms.json to trigger the file watcher, and prints the matching
+# reload log lines next to the expected ones. Log: /tmp/reload-test.log.
+# Runs about 8 s.
+#
+# Manual smoke test, not part of `go test` or CI: it prints results for a
+# person to read and exits 0 whether or not the checks pass. Run it from the
+# repository root after `go build` (it executes ./tempest-homekit-go and reads
+# ./tempest-alarms.json).
+#
+# Usage: ./tests/test-alarm-reload.sh
 echo "=========================================="
 echo "Testing Alarm Config Reload Logging"
 echo "=========================================="

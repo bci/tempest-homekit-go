@@ -6,6 +6,7 @@ import (
 	"testing"
 )
 
+// TestGetFloat64AndGetInt checks nil and numeric conversions of the JSON value helpers.
 func TestGetFloat64AndGetInt(t *testing.T) {
 	if getFloat64(nil) != 0.0 {
 		t.Fatalf("expected 0.0 for nil")
@@ -25,6 +26,7 @@ func TestGetFloat64AndGetInt(t *testing.T) {
 	}
 }
 
+// TestFindStationByNameAndGetTempestDeviceID checks lookup by Name and finding the station Tempest device.
 func TestFindStationByNameAndGetTempestDeviceID(t *testing.T) {
 	stations := []Station{
 		{StationID: 1, Name: "Alpha", StationName: "Alpha"},
@@ -42,6 +44,7 @@ func TestFindStationByNameAndGetTempestDeviceID(t *testing.T) {
 	}
 }
 
+// TestGetObservationFromURL_HTTPServer checks that GetObservationFromURL decodes an observation from a local server.
 func TestGetObservationFromURL_HTTPServer(t *testing.T) {
 	// Minimal valid ObservationResponse JSON
 	jsonBody := `{"obs":[{"timestamp": 1696761600, "wind_avg": 1.23, "brightness": 100, "uv": 5, "precip": 0.0, "precipitation_type": 0, "battery": 3.7, "report_interval": 60}]}`

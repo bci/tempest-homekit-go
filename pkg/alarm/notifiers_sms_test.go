@@ -8,6 +8,9 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
+// TestSMSNotifier checks SMSNotifier.Send errors for AWS SNS with and without
+// credentials, Twilio without credentials and an unsupported provider. The
+// "valid config" case uses fake AWS keys, so its error comes from the AWS call.
 func TestSMSNotifier(t *testing.T) {
 	// Note: This is a functional test that validates the SMS notifier logic
 	// Actual AWS SNS calls are not made without valid credentials
@@ -121,6 +124,8 @@ func TestSMSNotifier(t *testing.T) {
 	}
 }
 
+// TestSMSNotifierTemplateExpansion checks that sending an SMS with a templated message
+// and no AWS credentials fails; it only logs when the error is not a credentials error.
 func TestSMSNotifierTemplateExpansion(t *testing.T) {
 	// Test that SMS messages properly expand templates
 	config := &AlarmConfig{
@@ -164,6 +169,9 @@ func TestSMSNotifierTemplateExpansion(t *testing.T) {
 	}
 }
 
+// TestSMSNotifierWithTopicARN checks that ${VAR} references for AWS keys and an SNS
+// topic ARN are resolved from the environment, so the send fails at the AWS call rather
+// than with a "credentials missing" error.
 func TestSMSNotifierWithTopicARN(t *testing.T) {
 	// Test SNS topic ARN configuration
 	_ = os.Setenv("AWS_ACCESS_KEY_ID", "test-key")
@@ -218,6 +226,9 @@ func TestSMSNotifierWithTopicARN(t *testing.T) {
 	}
 }
 
+// TestSMSNotifierMultipleRecipients checks that a channel with three recipients passes
+// config validation, so the send fails at the AWS call rather than with a "credentials
+// missing" error.
 func TestSMSNotifierMultipleRecipients(t *testing.T) {
 	// Test sending to multiple phone numbers
 	_ = os.Setenv("AWS_ACCESS_KEY_ID", "test-key")
@@ -274,6 +285,8 @@ func TestSMSNotifierMultipleRecipients(t *testing.T) {
 	}
 }
 
+// TestSMSFactoryCreation checks that the factory builds an *SMSNotifier for "sms" when
+// the AWS provider is configured.
 func TestSMSFactoryCreation(t *testing.T) {
 	// Test that the notifier factory creates SMS notifiers correctly
 	config := &AlarmConfig{

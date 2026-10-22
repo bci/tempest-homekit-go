@@ -6,6 +6,8 @@ import (
 	"time"
 )
 
+// TestSchedule_AlwaysActive checks that a nil schedule, an empty one and type "always"
+// are all active.
 func TestSchedule_AlwaysActive(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -28,6 +30,8 @@ func TestSchedule_AlwaysActive(t *testing.T) {
 	}
 }
 
+// TestSchedule_TimeRange checks a "time" schedule is active inclusively between start
+// and end, and that a range crossing midnight is active on both sides of it.
 func TestSchedule_TimeRange(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -99,6 +103,8 @@ func TestSchedule_TimeRange(t *testing.T) {
 	}
 }
 
+// TestSchedule_Daily checks that a "daily" schedule is active inside its time range and
+// inactive outside it.
 func TestSchedule_Daily(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -133,6 +139,8 @@ func TestSchedule_Daily(t *testing.T) {
 	}
 }
 
+// TestSchedule_Weekly checks that a "weekly" schedule is active only on its listed days
+// (0 = Sunday) and, when times are given, only within them.
 func TestSchedule_Weekly(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -215,6 +223,9 @@ func TestSchedule_Weekly(t *testing.T) {
 	}
 }
 
+// TestSchedule_Sun checks "sun" schedules for Los Angeles against sunrise and sunset
+// computed by calculateSunTimes: open-ended after sunrise, sunrise-to-sunset, and with
+// start and end offsets in minutes.
 func TestSchedule_Sun(t *testing.T) {
 	// Use Los Angeles coordinates for testing (34.0522°N, 118.2437°W)
 	lat := 34.0522
@@ -297,6 +308,9 @@ func TestSchedule_Sun(t *testing.T) {
 	}
 }
 
+// TestSchedule_Validate checks Validate for each schedule type: required fields, the
+// HH:MM time format, day numbers 0-6, start and end given together, valid sun event names
+// and unknown types.
 func TestSchedule_Validate(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -388,6 +402,8 @@ func TestSchedule_Validate(t *testing.T) {
 	}
 }
 
+// TestSchedule_String calls String on several schedules. It only guards against an empty
+// result; the contains field is not actually compared.
 func TestSchedule_String(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -427,6 +443,8 @@ func TestSchedule_String(t *testing.T) {
 	}
 }
 
+// TestSchedule_JSON checks that schedules round-trip through JSON, comparing Type and
+// StartTime.
 func TestSchedule_JSON(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -471,6 +489,9 @@ func TestSchedule_JSON(t *testing.T) {
 	}
 }
 
+// TestCalculateSunTimes checks calculateSunTimes for Los Angeles in January: sunrise is
+// before sunset on the same date and the day is 8-16 hours long. Implausible clock times
+// are only logged.
 func TestCalculateSunTimes(t *testing.T) {
 	// Test known location: Los Angeles
 	lat := 34.0522
@@ -511,6 +532,8 @@ func TestCalculateSunTimes(t *testing.T) {
 	}
 }
 
+// TestSchedule_WithScheduleInAlarm checks that an Alarm's Schedule survives a JSON
+// round trip.
 func TestSchedule_WithScheduleInAlarm(t *testing.T) {
 	// Test that Schedule integrates properly with Alarm struct
 	alarm := Alarm{
@@ -551,7 +574,8 @@ func TestSchedule_WithScheduleInAlarm(t *testing.T) {
 	}
 }
 
-// Helper function to parse "HH:MM" into [hour, minute]
+// parseTime parses "HH:MM" into [hour, minute]. A parse error is ignored and yields
+// [0, 0].
 func parseTime(timeStr string) [2]int {
 	var hour, minute int
 	t, _ := time.Parse("15:04", timeStr)
@@ -560,6 +584,10 @@ func parseTime(timeStr string) [2]int {
 	return [2]int{hour, minute}
 }
 
+// TestSchedule_UseStationLocation checks that a sun schedule with UseStationLocation, or
+// with no custom coordinates, is active just after the station's (Los Angeles) sunrise,
+// and that String then says "(station location)". The custom-coordinates case is only
+// logged, not asserted.
 func TestSchedule_UseStationLocation(t *testing.T) {
 	// Test that use_station_location flag properly uses station coordinates
 	// Station location (Los Angeles)
@@ -657,6 +685,8 @@ func TestSchedule_UseStationLocation(t *testing.T) {
 	}
 }
 
+// TestSchedule_String_WithLocations checks that String mentions the station-location
+// flag or the custom coordinates of a sun schedule.
 func TestSchedule_String_WithLocations(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -690,6 +720,9 @@ func TestSchedule_String_WithLocations(t *testing.T) {
 	}
 }
 
+// stringContainsSubstr reports whether substr occurs in s, checking for equality, prefix
+// and suffix before scanning; it returns false when either string is empty. It is a
+// hand-rolled equivalent of strings.Contains.
 func stringContainsSubstr(s, substr string) bool {
 	return len(s) > 0 && len(substr) > 0 &&
 		(s == substr || len(s) >= len(substr) &&
@@ -697,6 +730,8 @@ func stringContainsSubstr(s, substr string) bool {
 				substringInMiddle(s, substr)))
 }
 
+// substringInMiddle reports whether substr occurs at any offset in s by checking every
+// window; it is the scanning fallback for stringContainsSubstr.
 func substringInMiddle(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {
@@ -706,6 +741,8 @@ func substringInMiddle(s, substr string) bool {
 	return false
 }
 
+// TestSchedule_Timezone checks that a time schedule with a Timezone is evaluated in that
+// zone, and that an invalid zone falls back to the time's own location.
 func TestSchedule_Timezone(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -770,6 +807,8 @@ func TestSchedule_Timezone(t *testing.T) {
 	}
 }
 
+// TestSchedule_Validate_Timezone checks that Validate rejects an unknown IANA timezone
+// and accepts a valid or absent one.
 func TestSchedule_Validate_Timezone(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -817,6 +856,8 @@ func TestSchedule_Validate_Timezone(t *testing.T) {
 	}
 }
 
+// TestSchedule_String_WithTimezone checks that String appends "[zone]" when a timezone
+// is set and describes a "time" schedule as "Daily from HH:MM to HH:MM".
 func TestSchedule_String_WithTimezone(t *testing.T) {
 	tests := []struct {
 		name          string

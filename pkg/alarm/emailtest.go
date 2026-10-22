@@ -10,9 +10,20 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
+// appVersion is the application version shown in test messages and in
+// {{app_info}}. It is maintained by hand and must start with "v".
 const appVersion = "v1.7.0"
 
-// TestEmailConfiguration tests the email configuration by sending a test email
+// TestEmailConfiguration tests the email configuration by sending a test email.
+//
+// It reads the provider settings directly from the environment, preferring
+// Microsoft 365 when MS365_CLIENT_ID, MS365_CLIENT_SECRET and MS365_TENANT_ID
+// are all set and SMTP when SMTP_HOST is set, prints them with secrets masked,
+// and sends a test email to TEST_EMAIL_RECIPIENT through the real
+// [NotifierFactory] path. alarmsJSON is the alarm config input accepted by
+// [LoadAlarmConfig]; stationName fills {{station}}. It returns an error if no
+// provider or required variable is set, the recipient is missing or has no
+// "@" and ".", the config fails to load, or sending fails.
 func TestEmailConfiguration(alarmsJSON, stationName string) error {
 	fmt.Println("Reading email configuration from environment variables...")
 	fmt.Println()
@@ -224,7 +235,8 @@ Current Weather Data:
 	return nil
 }
 
-// RunEmailTest is a convenience function that wraps TestEmailConfiguration and exits
+// RunEmailTest is a convenience function that wraps TestEmailConfiguration and exits.
+// It never returns: it calls os.Exit(0) on success and log.Fatalf on failure.
 func RunEmailTest(alarmsJSON, stationName string) {
 	if err := TestEmailConfiguration(alarmsJSON, stationName); err != nil {
 		log.Fatalf("Email test failed: %v", err)

@@ -1,5 +1,11 @@
 // Package service provides the main service orchestration for the Tempest HomeKit bridge.
 // It coordinates between the WeatherFlow API client, HomeKit accessories, and web dashboard.
+//
+// StartService wires everything together and then runs a single observation loop
+// that is the same for every data source. The package also provides the data
+// source factory (CreateDataSource, overridable through DataSourceFactory) that
+// picks the appropriate weather data source - UDP broadcast, custom station URL,
+// generated weather or the WeatherFlow API - from the configuration.
 package service
 
 import (
@@ -21,6 +27,21 @@ import (
 // StartService initializes and starts the Tempest HomeKit service with the provided configuration.
 // It sets up HomeKit accessories, starts the web server, and begins weather data polling.
 // Now uses unified data source architecture for clean separation of concerns.
+//
+// In order it: resolves the station (WeatherFlow API lookup, a placeholder in UDP
+// mode, or a fake station for generated weather), starts the HomeKit bridge
+// unless cfg.DisableHomeKit, starts the web dashboard unless
+// cfg.DisableWebConsole, sets up the alarm manager when alarms are configured,
+// optionally preloads history (cfg.HistoryRead), creates the data source through
+// DataSourceFactory and starts it. It then blocks, feeding every observation to
+// HomeKit, the web server and the alarm manager, until the data source closes its
+// channel. cfg.Elevation is overwritten with the generated location's elevation
+// in generated-weather mode.
+//
+// version is shown on the dashboard. It returns an error if the station cannot be
+// found or fetched, HomeKit setup fails, the station URL cannot be parsed, or the
+// data source cannot be created or started; it returns nil when the observation
+// channel closes.
 func StartService(cfg *config.Config, version string) error {
 	// Set log level
 	logger.SetLogLevel(cfg.LogLevel)

@@ -5,6 +5,7 @@ import (
 	"time"
 )
 
+// TestStatusManager_FallbackAndUpdateBattery checks the initial placeholder status and that an observation battery reading replaces it.
 func TestStatusManager_FallbackAndUpdateBattery(t *testing.T) {
 	sm := NewStatusManager(123, "debug", false)
 
@@ -29,12 +30,17 @@ func TestStatusManager_FallbackAndUpdateBattery(t *testing.T) {
 	}
 }
 
-// fakeListener implements UDPListener for testing UDPDataSource without network
+// fakeListener implements UDPListener for testing UDPDataSource without network.
+// Observations pushed into ch are delivered through ObservationChannel; obs backs
+// GetLatestObservation, GetObservations and the count in GetStats (which also
+// reports a fixed IP and serial). Stop closes ch, so it may be called only once;
+// the other methods are no-ops.
 type fakeListener struct {
 	ch  chan Observation
 	obs []Observation
 }
 
+// Start is a no-op that returns nil.
 func (f *fakeListener) Start() error { return nil }
 func (f *fakeListener) Stop() error  { close(f.ch); return nil }
 func (f *fakeListener) GetLatestObservation() *Observation {
@@ -52,6 +58,7 @@ func (f *fakeListener) ObservationChannel() <-chan Observation { return f.ch }
 func (f *fakeListener) GetDeviceStatus() interface{}           { return nil }
 func (f *fakeListener) GetHubStatus() interface{}              { return nil }
 
+// TestUDPDataSource_Forwarding checks that an observation from the listener is forwarded to the data source channel and that Stop succeeds.
 func TestUDPDataSource_Forwarding(t *testing.T) {
 	f := &fakeListener{ch: make(chan Observation, 10), obs: []Observation{}}
 	ds := NewUDPDataSource(f, true, 0, "")

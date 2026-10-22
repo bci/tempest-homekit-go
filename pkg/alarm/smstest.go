@@ -9,7 +9,16 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
-// TestSMSConfiguration tests the SMS configuration by sending a test SMS
+// TestSMSConfiguration tests the SMS configuration by sending a test SMS.
+//
+// It loads alarmsJSON with [LoadAlarmConfig] to obtain the SMS provider
+// settings from the environment, prints them with secrets masked, and sends a
+// test message to TEST_SMS_RECIPIENT (which must be in E.164 form, starting
+// with "+") through the real [NotifierFactory] path; stationName appears in
+// the message. Progress is also logged with an [SMS-TEST] prefix. It returns
+// an error if the config fails to load, no or an unsupported provider is
+// configured, required credentials are missing, the recipient is missing or
+// malformed, or sending fails.
 func TestSMSConfiguration(alarmsJSON, stationName string) error {
 	log.Printf("[SMS-TEST] Starting SMS configuration test for station: %s", stationName)
 
@@ -175,7 +184,8 @@ func TestSMSConfiguration(alarmsJSON, stationName string) error {
 	return nil
 }
 
-// RunSMSTest is a convenience function that wraps TestSMSConfiguration and exits
+// RunSMSTest is a convenience function that wraps TestSMSConfiguration and exits.
+// It never returns: it calls os.Exit(0) on success and log.Fatalf on failure.
 func RunSMSTest(alarmsJSON, stationName string) {
 	log.Printf("[SMS-TEST] Starting isolated SMS test mode")
 	log.Printf("[SMS-TEST] This test will send a test SMS and exit - no alarm processing will occur")
@@ -190,7 +200,10 @@ func RunSMSTest(alarmsJSON, stationName string) {
 	os.Exit(0)
 }
 
-// maskString masks a string for display (shows first 4 and last 4 characters)
+// maskString masks a string for display: it shows the first 4 and last 4
+// characters of strings longer than 8, "***" plus the last 2 characters of
+// shorter ones, and "(not set)" for an empty string. A one-character input
+// panics (slice index -1).
 func maskString(s string) string {
 	if s == "" {
 		return "(not set)"

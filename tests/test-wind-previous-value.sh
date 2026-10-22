@@ -1,6 +1,19 @@
 #!/bin/bash
 
 # Test script to verify last_wind_speed shows correct previous value
+#
+# Starts the app at debug level on web port 8085, waits 130 s for two live
+# observations, stops it, and compares the previous/current wind speed from
+# the "Change detected in wind_speed:" debug line with the "Last Wind Speed:"
+# and "Wind speed:" values in the "Wind Change" notification, numerically
+# via awk. Needs network access (WeatherFlow API). Log: /tmp/wind-test.log.
+#
+# Manual smoke test, not part of `go test` or CI: it prints results for a
+# person to read and exits 0 whether or not the checks pass. Run it from the
+# repository root after `go build` (it executes ./tempest-homekit-go and reads
+# ./tempest-alarms.json).
+#
+# Usage: ./tests/test-wind-previous-value.sh
 echo "=========================================="
 echo "Testing Previous Value Fix"
 echo "=========================================="

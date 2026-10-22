@@ -1,16 +1,118 @@
+/**
+ * @module alarm-editor
+ * @description Browser-side logic for the standalone alarm editor page served by
+ * pkg/alarm/editor (the HTML lives in html.go and loads this file from
+ * /alarm-editor/static/script.js at the end of <body>).
+ *
+ * The page lists alarms from GET /api/config, lets the user create/edit/delete them
+ * through a modal form, and talks to the editor server's JSON endpoints
+ * (/api/tags, /api/contacts, /api/env-defaults, /api/validate, /api/validate-json,
+ * /api/alarms/create|update|delete, /api/contacts/save, /api/tags/save).
+ * Most functions are invoked from inline onclick/onchange attributes in html.go, so
+ * they must stay global (no module system, no bundler).
+ *
+ * State is kept in the module-level `let` variables below; the modal form is the
+ * source of truth while it is open and is serialized back to JSON in handleSubmit.
+ */
+
+/**
+ * A notification channel on an alarm, as stored in the alarm config JSON.
+ * Exactly one of the type-specific sub-objects is present, matching `type`.
+ * @typedef {Object} AlarmChannel
+ * @property {string} type - One of console, syslog, oslog, eventlog, email, sms, webhook, csv, json.
+ * @property {string} [template] - Message template for console/syslog/oslog/eventlog.
+ * @property {{to: string[], subject: string, body: string, html: boolean}} [email]
+ * @property {{to: string[], message: string}} [sms]
+ * @property {{url: string, method: string, headers: Object<string,string>, body: string, content_type: string}} [webhook]
+ * @property {{path: string, max_days: number, message: string}} [csv]
+ * @property {{path: string, max_days: number, message: string}} [json]
+ */
+
+/**
+ * Optional activation window for an alarm. Absent/null means "always active".
+ * @typedef {Object} AlarmSchedule
+ * @property {string} type - 'time', 'daily', 'weekly' or 'sun'.
+ * @property {string} [timezone] - IANA zone name; omitted when blank.
+ * @property {string} [start_time] - HH:MM start (time/daily, optional for weekly).
+ * @property {string} [end_time] - HH:MM end (time/daily, optional for weekly).
+ * @property {number[]} [days_of_week] - Weekly only; 0 = Sunday ... 6 = Saturday.
+ * @property {string} [sun_event] - Sun only; e.g. 'sunrise' or 'sunset'.
+ * @property {number} [sun_offset] - Sun only; offset applied to sun_event.
+ * @property {string} [sun_event_end] - Sun only; optional end event.
+ * @property {number} [sun_offset_end] - Sun only; offset applied to sun_event_end.
+ * @property {boolean} [use_station_location] - Sun only; use the station's coordinates.
+ * @property {number} [latitude] - Sun only; custom location latitude.
+ * @property {number} [longitude] - Sun only; custom location longitude.
+ */
+
+/**
+ * One alarm as returned by /api/config and posted to /api/alarms/create|update.
+ * @typedef {Object} Alarm
+ * @property {string} name - Unique name; also the key used by edit/delete.
+ * @property {string} [description]
+ * @property {string} condition - Alarm condition expression (validated by /api/validate).
+ * @property {string[]} tags
+ * @property {number} cooldown - Seconds between repeat notifications.
+ * @property {boolean} enabled
+ * @property {AlarmChannel[]} channels
+ * @property {AlarmSchedule} [schedule]
+ */
+
+/**
+ * An address-book entry from /api/contacts.
+ * @typedef {Object} Contact
+ * @property {string} name
+ * @property {string} [email]
+ * @property {string} [sms] - Phone number; the server requires a leading '+'.
+ */
+
+/**
+ * All alarms loaded from the server; re-fetched after every save/delete.
+ * @type {Alarm[]}
+ */
 let alarms = [];
+/**
+ * The alarm open in the edit modal, or null when the modal is creating a new alarm.
+ * handleSubmit uses it to choose between the create and update endpoints.
+ * @type {?Alarm}
+ */
 let currentAlarm = null;
+/**
+ * Every known tag (from /api/tags plus any added in this session), kept sorted when
+ * addTag appends a new one.
+ * @type {string[]}
+ */
 let allTags = [];
+/**
+ * Tags chosen for the alarm in the edit modal.
+ * @type {string[]}
+ */
 let selectedTags = [];
+/**
+ * Address book loaded from /api/contacts, used to populate the contact dropdowns.
+ * @type {Contact[]}
+ */
 let contacts = [];
+/**
+ * Email recipients chosen for the alarm in the edit modal.
+ * @type {string[]}
+ */
 let selectedEmailContacts = [];
+/**
+ * SMS recipients (phone numbers) chosen for the alarm in the edit modal.
+ * @type {string[]}
+ */
 let selectedSMSContacts = [];
 
 // ============================================
 // Theme Switching System
 // ============================================
 
-// Load saved theme on page load
+/**
+ * Load saved theme on page load: applies the theme stored under the
+ * 'selected-theme' localStorage key (default 'default'), syncs the #theme-select
+ * dropdown to it, and persists any later change the user makes there.
+ */
 document.addEventListener('DOMContentLoaded', function() {
     const savedTheme = localStorage.getItem('selected-theme') || 'default';
     applyTheme(savedTheme);
@@ -28,7 +130,13 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-// Apply theme to document
+/**
+ * Apply theme to document by setting `data-theme` on <body>. The 'default' theme
+ * is represented by the attribute being absent, so themes.css only needs rules for
+ * the named themes.
+ * @param {string} themeName - Theme id from #theme-select, or 'default'.
+ * @returns {void}
+ */
 function applyTheme(themeName) {
     const body = document.body;
     
@@ -41,6 +149,13 @@ function applyTheme(themeName) {
     }
 }
 
+/**
+ * Page bootstrap: loads alarms, tags and contacts (sequentially, because
+ * updateTagFilter and the contact dropdowns read the loaded data), wires the search,
+ * tag-filter and form-submit listeners, and initialises the tag/contact pickers.
+ * Called once at the bottom of this file.
+ * @returns {Promise<void>}
+ */
 async function init() {
     await loadAlarms();
     await loadTags();
@@ -55,6 +170,13 @@ async function init() {
     updateLastUpdateTimestamp();
 }
 
+/**
+ * Fetches the full config from /api/config and re-renders the alarm list. A
+ * timestamp query parameter defeats browser caching so a reload right after a save
+ * sees the new data.
+ * @returns {Promise<void>}
+ * @throws {Error} If the fetch or JSON parse fails (not caught here).
+ */
 async function loadAlarms() {
     const response = await fetch('/api/config?_=' + Date.now());
     const config = await response.json();
@@ -62,12 +184,22 @@ async function loadAlarms() {
     renderAlarms();
 }
 
+/**
+ * Fetches the tag list from /api/tags into allTags and rebuilds the tag filter.
+ * @returns {Promise<void>}
+ * @throws {Error} If the fetch or JSON parse fails (not caught here).
+ */
 async function loadTags() {
     const response = await fetch('/api/tags');
     allTags = await response.json();
     updateTagFilter();
 }
 
+/**
+ * Fetches the address book from /api/contacts into `contacts`. Failure is logged and
+ * leaves an empty list, because contacts are optional for using the editor.
+ * @returns {Promise<void>}
+ */
 async function loadContacts() {
     try {
         const response = await fetch('/api/contacts');
@@ -78,6 +210,13 @@ async function loadContacts() {
     }
 }
 
+/**
+ * onchange handler for the hidden legacy #emailContactSelect: adds the chosen
+ * contact's email (the option value is an index into `contacts`) and resets the
+ * select. Superseded by the searchable dropdown in initContactSelectors but still
+ * wired in html.go.
+ * @returns {void}
+ */
 function addContactEmail() {
     const select = document.getElementById('emailContactSelect');
     const contactIndex = select.value;
@@ -93,6 +232,11 @@ function addContactEmail() {
     select.value = '';
 }
 
+/**
+ * onchange handler for the hidden legacy #smsContactSelect; SMS counterpart of
+ * addContactEmail.
+ * @returns {void}
+ */
 function addContactSMS() {
     const select = document.getElementById('smsContactSelect');
     const contactIndex = select.value;
@@ -108,6 +252,10 @@ function addContactSMS() {
     select.value = '';
 }
 
+/**
+ * Rebuilds the #filterTag dropdown from allTags, preserving the current selection.
+ * @returns {void}
+ */
 function updateTagFilter() {
     const select = document.getElementById('filterTag');
     const currentValue = select.value;
@@ -121,6 +269,12 @@ function updateTagFilter() {
     });
 }
 
+/**
+ * Wires the searchable email and SMS recipient pickers: focus opens the dropdown,
+ * typing filters it, Enter adds the typed text as a free-form recipient, and a click
+ * outside either picker closes both dropdowns.
+ * @returns {void}
+ */
 function initContactSelectors() {
     // Email contact selector
     const emailSearchInput = document.getElementById('emailContactSearch');
@@ -181,6 +335,11 @@ function initContactSelectors() {
     });
 }
 
+/**
+ * Wires the searchable tag picker the same way initContactSelectors wires the
+ * recipient pickers (focus, filter-as-you-type, Enter to add, click-outside to close).
+ * @returns {void}
+ */
 function initTagSelectors() {
     // Tag selector
     const tagSearchInput = document.getElementById('tagSearchInput');
@@ -215,6 +374,14 @@ function initTagSelectors() {
     });
 }
 
+/**
+ * Rebuilds a recipient dropdown: lists address-book contacts of that type that are
+ * not already selected and whose name or address contains the search term, plus a
+ * "+ Add new" entry when the term is not an existing contact or selection.
+ * @param {('email'|'sms')} type - Which picker to rebuild.
+ * @param {string} searchTerm - Current text in the picker's search box.
+ * @returns {void}
+ */
 function updateContactDropdown(type, searchTerm) {
     const dropdown = document.getElementById(type + 'ContactDropdown');
     const searchLower = searchTerm.toLowerCase();
@@ -271,6 +438,13 @@ function updateContactDropdown(type, searchTerm) {
     }
 }
 
+/**
+ * Adds a recipient (trimmed, de-duplicated) to the selected list for `type` and
+ * re-renders the chips.
+ * @param {('email'|'sms')} type
+ * @param {string} contactValue - Email address or phone number.
+ * @returns {void}
+ */
 function addContact(type, contactValue) {
     const trimmedContact = contactValue.trim();
     if (!trimmedContact) return;
@@ -283,6 +457,13 @@ function addContact(type, contactValue) {
     }
 }
 
+/**
+ * Removes a recipient chip; called from the chip's inline onclick. Refreshes the
+ * dropdown so the removed contact becomes selectable again.
+ * @param {('email'|'sms')} type
+ * @param {string} contact - The exact recipient string to remove.
+ * @returns {void}
+ */
 function removeContact(type, contact) {
     const selectedContacts = type === 'email' ? selectedEmailContacts : selectedSMSContacts;
     const index = selectedContacts.indexOf(contact);
@@ -293,6 +474,13 @@ function removeContact(type, contact) {
     }
 }
 
+/**
+ * Renders the selected recipients for `type` as removable chips into
+ * #selectedEmailContacts or #selectedSMSContacts. Values are inserted as raw HTML;
+ * only single quotes are escaped (for the inline onclick).
+ * @param {('email'|'sms')} type
+ * @returns {void}
+ */
 function renderSelectedContacts(type) {
     const container = document.getElementById('selected' + (type === 'email' ? 'Email' : 'SMS') + 'Contacts');
     const selectedContacts = type === 'email' ? selectedEmailContacts : selectedSMSContacts;
@@ -310,6 +498,12 @@ function renderSelectedContacts(type) {
     ).join('');
 }
 
+/**
+ * Rebuilds the tag dropdown: unselected tags containing the search term (case
+ * insensitive) plus a "+ Add new tag" entry when the term is new.
+ * @param {string} [searchTerm=''] - Current text in #tagSearchInput.
+ * @returns {void}
+ */
 function updateTagDropdown(searchTerm = '') {
     const dropdown = document.getElementById('tagDropdown');
     const searchLower = searchTerm.toLowerCase();
@@ -358,6 +552,12 @@ function updateTagDropdown(searchTerm = '') {
     }
 }
 
+/**
+ * Selects a tag for the alarm being edited. A tag not yet in allTags is added there
+ * too (kept sorted) and the filter dropdown is rebuilt, so new tags appear at once.
+ * @param {string} tag - Tag text; trimmed, ignored if empty or already selected.
+ * @returns {void}
+ */
 function addTag(tag) {
     const trimmedTag = tag.trim();
     if (!trimmedTag || selectedTags.includes(trimmedTag)) return;
@@ -374,12 +574,22 @@ function addTag(tag) {
     renderSelectedTags();
 }
 
+/**
+ * Deselects a tag; called from the tag chip's inline onclick.
+ * @param {string} tag
+ * @returns {void}
+ */
 function removeTag(tag) {
     selectedTags = selectedTags.filter(t => t !== tag);
     renderSelectedTags();
     updateTagDropdown();
 }
 
+/**
+ * Renders selectedTags as removable chips into #selectedTags (raw HTML; only single
+ * quotes are escaped for the inline onclick).
+ * @returns {void}
+ */
 function renderSelectedTags() {
     const container = document.getElementById('selectedTags');
     
@@ -396,10 +606,21 @@ function renderSelectedTags() {
     ).join('');
 }
 
+/**
+ * Listener for the name search box and tag filter; simply re-renders the list.
+ * @returns {void}
+ */
 function filterAlarms() {
     renderAlarms();
 }
 
+/**
+ * Renders the alarm cards into #alarmList, applying the name (case-insensitive
+ * substring) and tag filters, and toggles #emptyState when nothing matches. Card
+ * buttons call editAlarm/showAlarmJSON/deleteAlarm by alarm name via inline onclick.
+ * Alarm fields are concatenated into HTML without escaping.
+ * @returns {void}
+ */
 function renderAlarms() {
     const nameFilter = document.getElementById('searchName').value.toLowerCase();
     const tagFilter = document.getElementById('filterTag').value;
@@ -449,6 +670,13 @@ function renderAlarms() {
     }).join('');
 }
 
+/**
+ * Inserts a sensor field name into the condition textarea at the cursor, adding a
+ * leading space unless the cursor follows a space or '(' so expressions stay
+ * tokenisable. Called by the sensor-field buttons in html.go.
+ * @param {string} fieldName - e.g. 'humidity', 'lux'.
+ * @returns {void}
+ */
 function insertField(fieldName) {
     const textarea = document.getElementById('alarmCondition');
     const cursorPos = textarea.selectionStart;
@@ -464,6 +692,15 @@ function insertField(fieldName) {
     textarea.setSelectionRange(cursorPos + prefix.length + fieldName.length, cursorPos + prefix.length + fieldName.length);
 }
 
+/**
+ * onchange handler for the "Insert Variable" dropdowns: inserts the chosen
+ * {{placeholder}} at the cursor and resets the dropdown. Reads the triggering
+ * <select> from the global `event` object, so it only works as an inline handler.
+ * @param {string} textareaId - Target textarea id.
+ * @param {string} [alternateId] - Second candidate (e.g. email subject vs body); used
+ *     instead of textareaId when it currently has focus.
+ * @returns {void}
+ */
 function insertVariable(textareaId, alternateId) {
     const select = event.target;
     const variable = select.value;
@@ -494,6 +731,10 @@ function insertVariable(textareaId, alternateId) {
     select.selectedIndex = 0;
 }
 
+/**
+ * Show/hide each delivery method's message section according to its checkbox.
+ * @returns {void}
+ */
 function toggleMessageSections() {
     // Show/hide message sections based on selected delivery methods
     const consoleChecked = document.getElementById('deliveryConsole').checked;
@@ -518,6 +759,12 @@ function toggleMessageSections() {
     document.getElementById('jsonMessageSection').style.display = jsonChecked ? 'block' : 'none';
 }
 
+/**
+ * Shows the schedule sub-section matching #scheduleType (time/daily share one
+ * section) and shows the timezone field for any non-empty type. Every element is
+ * null-checked so the form works on pages without the schedule UI.
+ * @returns {void}
+ */
 function toggleScheduleFields() {
     const scheduleTypeEl = document.getElementById('scheduleType');
     if (!scheduleTypeEl) return;
@@ -549,6 +796,10 @@ function toggleScheduleFields() {
     }
 }
 
+/**
+ * Shows the optional weekly start/end time fields when #weeklyTimeRange is checked.
+ * @returns {void}
+ */
 function toggleWeeklyTimeRange() {
     const checkbox = document.getElementById('weeklyTimeRange');
     const fields = document.getElementById('weeklyTimeRangeFields');
@@ -557,6 +808,10 @@ function toggleWeeklyTimeRange() {
     fields.style.display = checkbox.checked ? 'block' : 'none';
 }
 
+/**
+ * Shows the optional sun end-event fields when #sunHasEndEvent is checked.
+ * @returns {void}
+ */
 function toggleSunEndEvent() {
     const checkbox = document.getElementById('sunHasEndEvent');
     const fields = document.getElementById('sunEndEventFields');
@@ -565,6 +820,10 @@ function toggleSunEndEvent() {
     fields.style.display = checkbox.checked ? 'block' : 'none';
 }
 
+/**
+ * Shows the latitude/longitude inputs when #sunHasCustomLocation is checked.
+ * @returns {void}
+ */
 function toggleCustomLocation() {
     const checkbox = document.getElementById('sunHasCustomLocation');
     const inputs = document.getElementById('customLocationInputs');
@@ -573,13 +832,30 @@ function toggleCustomLocation() {
     inputs.style.display = checkbox.checked ? 'block' : 'none';
 }
 
+/**
+ * Resets every schedule input to its default (no schedule, sunrise/sunset with zero
+ * offsets, no days, no custom location) and re-runs the visibility toggles.
+ * @returns {void}
+ */
 function clearScheduleForm() {
     // Helper to safely clear an element if it exists
+    /**
+     * Sets an element's value if the element exists.
+     * @param {string} id - Element id.
+     * @param {string} value
+     * @returns {void}
+     */
     const safeSet = (id, value) => {
         const el = document.getElementById(id);
         if (el) el.value = value;
     };
     
+    /**
+     * Sets a checkbox's checked state if the element exists.
+     * @param {string} id - Element id.
+     * @param {boolean} checked
+     * @returns {void}
+     */
     const safeCheck = (id, checked) => {
         const el = document.getElementById(id);
         if (el) el.checked = checked;
@@ -621,6 +897,13 @@ function clearScheduleForm() {
     }
 }
 
+/**
+ * Fills the schedule inputs from an alarm's schedule, or clears them when the alarm
+ * has none. Only sets fields present in the schedule; it does not clear the others
+ * first (see editAlarm).
+ * @param {?AlarmSchedule} schedule
+ * @returns {void}
+ */
 function loadScheduleIntoForm(schedule) {
     if (!schedule || !schedule.type) {
         clearScheduleForm();
@@ -683,6 +966,11 @@ function loadScheduleIntoForm(schedule) {
     toggleCustomLocation();
 }
 
+/**
+ * Builds an AlarmSchedule from the schedule inputs. Offsets are parsed as integers
+ * (NaN becomes 0); a custom location is included only when both coordinates parse.
+ * @returns {?AlarmSchedule} null when no schedule type is selected (always active).
+ */
 function serializeScheduleFromForm() {
     const scheduleType = document.getElementById('scheduleType').value;
     
@@ -743,6 +1031,13 @@ function serializeScheduleFromForm() {
     return schedule;
 }
 
+/**
+ * Opens the edit modal in "create" mode: clears currentAlarm and every field,
+ * selects console delivery only, fills each delivery method with a ready-made
+ * default template, then asynchronously pulls default recipients via
+ * loadEnvDefaults.
+ * @returns {void}
+ */
 function showCreateModal() {
     currentAlarm = null;
     document.getElementById('alarmName').value = '';
@@ -913,6 +1208,13 @@ Sensor Data:
     // populateContactDropdowns(); // No longer needed with dynamic dropdowns
 }
 
+/**
+ * Fetches /api/env-defaults ({emailTo, smsTo}: comma-separated values from the
+ * server's MS365_TO_ADDRESS and SMS_TO_NUMBER environment variables) and uses them
+ * as the recipient lists, but only when the user has not already chosen any.
+ * Failures are logged and ignored.
+ * @returns {Promise<void>}
+ */
 async function loadEnvDefaults() {
     try {
         const response = await fetch('/api/env-defaults');
@@ -936,6 +1238,13 @@ async function loadEnvDefaults() {
     }
 }
 
+/**
+ * Opens the edit modal for an existing alarm: clears every field (so values from a
+ * previous edit do not leak through), then loads the alarm's tags, cooldown,
+ * delivery checkboxes, per-channel templates/settings, recipients and schedule.
+ * @param {string} name - Name of the alarm in `alarms`; does nothing if not found.
+ * @returns {void}
+ */
 function editAlarm(name) {
     currentAlarm = alarms.find(a => a.name === name);
     if (!currentAlarm) return;
@@ -1075,14 +1384,28 @@ function editAlarm(name) {
     // populateContactDropdowns(); // No longer needed with dynamic dropdowns
 }
 
+/**
+ * Hides the alarm edit modal (unsaved changes are discarded).
+ * @returns {void}
+ */
 function closeModal() {
     document.getElementById('editModal').classList.remove('active');
 }
 
+/**
+ * Hides the JSON viewer modal.
+ * @returns {void}
+ */
 function closeJSONModal() {
     document.getElementById('jsonModal').classList.remove('active');
 }
 
+/**
+ * Validates the condition textarea via POST /api/validate and shows the result
+ * (with the server's plain-English paraphrase on success) in #validationResult.
+ * Used by the Validate button and as a gate in handleSubmit.
+ * @returns {Promise<boolean>} true only if the server reports the condition valid.
+ */
 async function validateCondition() {
     const condition = document.getElementById('alarmCondition').value;
     const resultDiv = document.getElementById('validationResult');
@@ -1125,6 +1448,11 @@ async function validateCondition() {
     }
 }
 
+/**
+ * Validates the JSON-delivery template via POST /api/validate-json and shows the
+ * expanded sample output (pretty-printed when it parses) in #jsonValidationResult.
+ * @returns {Promise<boolean>} true only if the server reports the template valid.
+ */
 async function validateJSONMessage() {
     const template = document.getElementById('jsonMessage').value;
     const resultDiv = document.getElementById('jsonValidationResult');
@@ -1177,6 +1505,11 @@ async function validateJSONMessage() {
     }
 }
 
+/**
+ * Expands the JSON-delivery template via /api/validate-json and shows the sample
+ * output in the JSON modal, valid or not.
+ * @returns {Promise<void>}
+ */
 async function showSampleJSON() {
     const template = document.getElementById('jsonMessage').value;
     
@@ -1216,17 +1549,33 @@ async function showSampleJSON() {
     }
 }
 
+/**
+ * Shows the whole in-memory alarm config in the JSON modal.
+ * @returns {void}
+ */
 function showFullJSON() {
     const config = { alarms: alarms };
     displayJSON(config, 'Full Configuration JSON');
 }
 
+/**
+ * Shows one alarm's JSON in the JSON modal.
+ * @param {string} name - Alarm name; does nothing if not found.
+ * @returns {void}
+ */
 function showAlarmJSON(name) {
     const alarm = alarms.find(a => a.name === name);
     if (!alarm) return;
     displayJSON(alarm, 'Alarm: ' + name);
 }
 
+/**
+ * Opens the JSON modal with the given content (set as textContent, so it is safe to
+ * display untrusted text).
+ * @param {(Object|string)} data - Object to pretty-print, or an already formatted string.
+ * @param {string} title - Modal heading.
+ * @returns {void}
+ */
 function displayJSON(data, title) {
     document.getElementById('jsonModalTitle').textContent = title;
     
@@ -1243,6 +1592,12 @@ function displayJSON(data, title) {
     document.getElementById('jsonModal').classList.add('active');
 }
 
+/**
+ * Copies the JSON modal's content to the clipboard, falling back to a hidden
+ * textarea plus document.execCommand('copy') where the async Clipboard API is
+ * unavailable or denied (e.g. non-HTTPS origins).
+ * @returns {Promise<void>}
+ */
 async function copyJSON() {
     const jsonText = document.getElementById('jsonContent').textContent;
     try {
@@ -1266,6 +1621,18 @@ async function copyJSON() {
     }
 }
 
+/**
+ * Submit handler for #alarmForm. Validates the condition (and the JSON template when
+ * JSON delivery is on), builds the channels array from the checked delivery methods,
+ * substituting a default template for any blank one, and POSTs the alarm to
+ * /api/alarms/update?oldName=... (editing, so renames work) or /api/alarms/create.
+ * On success it closes the modal and reloads alarms and tags.
+ *
+ * Email/SMS channels with no recipients are saved with placeholder recipients
+ * (admin@example.com / +1234567890).
+ * @param {SubmitEvent} e
+ * @returns {Promise<void>}
+ */
 async function handleSubmit(e) {
     e.preventDefault();
     
@@ -1444,6 +1811,13 @@ async function handleSubmit(e) {
     }
 }
 
+/**
+ * Deletes an alarm after a confirm() prompt via POST /api/alarms/delete. Closes any
+ * modal showing it, removes it locally for instant feedback, then reloads alarms and
+ * tags from the server for consistency.
+ * @param {string} name
+ * @returns {Promise<void>}
+ */
 async function deleteAlarm(name) {
     if (!confirm('Are you sure you want to delete alarm "' + name + '"?')) return;
     
@@ -1479,6 +1853,12 @@ async function deleteAlarm(name) {
     }
 }
 
+/**
+ * "Save All" button: downloads the server's current config (GET /api/config) as
+ * alarms.json. It does not write anything on the server; edits are already persisted
+ * by the create/update/delete endpoints.
+ * @returns {Promise<void>}
+ */
 async function saveAll() {
     const response = await fetch('/api/config');
     const config = await response.json();
@@ -1493,6 +1873,12 @@ async function saveAll() {
     showNotification('Configuration saved', 'success');
 }
 
+/**
+ * Shows a toast in #notification for three seconds.
+ * @param {string} message - Plain text (set via textContent).
+ * @param {('success'|'error')} type - Added as a CSS class.
+ * @returns {void}
+ */
 function showNotification(message, type) {
     const notification = document.getElementById('notification');
     notification.textContent = message;
@@ -1502,6 +1888,10 @@ function showNotification(message, type) {
     }, 3000);
 }
 
+/**
+ * Writes the current local date/time (24-hour, en-US format) into #last-update.
+ * @returns {void}
+ */
 function updateLastUpdateTimestamp() {
     const lastUpdateElement = document.getElementById('last-update');
     if (lastUpdateElement) {
@@ -1522,24 +1912,45 @@ function updateLastUpdateTimestamp() {
 // Contacts and Tags Editor Functions
 // ============================================
 
+/**
+ * Opens the address-book editor and loads the contacts into it.
+ * @returns {void}
+ */
 function showEditContactsModal() {
     loadContactsForEditor();
     document.getElementById('editContactsModal').classList.add('active');
 }
 
+/**
+ * Hides the address-book editor.
+ * @returns {void}
+ */
 function closeEditContactsModal() {
     document.getElementById('editContactsModal').classList.remove('active');
 }
 
+/**
+ * Opens the tag-list editor and loads the tags into it.
+ * @returns {void}
+ */
 function showEditTagsModal() {
     loadTagsForEditor();
     document.getElementById('editTagsModal').classList.add('active');
 }
 
+/**
+ * Hides the tag-list editor.
+ * @returns {void}
+ */
 function closeEditTagsModal() {
     document.getElementById('editTagsModal').classList.remove('active');
 }
 
+/**
+ * Fetches /api/contacts fresh and renders it into the address-book editor (an empty
+ * editor on failure).
+ * @returns {Promise<void>}
+ */
 async function loadContactsForEditor() {
     try {
         const response = await fetch('/api/contacts');
@@ -1551,6 +1962,11 @@ async function loadContactsForEditor() {
     }
 }
 
+/**
+ * Fetches /api/tags fresh and renders it into the tag-list editor (an empty editor
+ * on failure).
+ * @returns {Promise<void>}
+ */
 async function loadTagsForEditor() {
     try {
         // Get all tags from the server (this includes both alarm tags and predefined tags)
@@ -1563,6 +1979,12 @@ async function loadTagsForEditor() {
     }
 }
 
+/**
+ * Renders one editable row (name, email, SMS, Remove) per contact into #contactsList.
+ * Values are interpolated into HTML attributes without escaping.
+ * @param {Contact[]} contacts
+ * @returns {void}
+ */
 function renderContactsEditor(contacts) {
     const container = document.getElementById('contactsList');
     container.innerHTML = '';
@@ -1585,6 +2007,11 @@ function renderContactsEditor(contacts) {
     });
 }
 
+/**
+ * Renders one editable row per tag into #tagsList (values not escaped).
+ * @param {string[]} tags
+ * @returns {void}
+ */
 function renderTagsEditor(tags) {
     const container = document.getElementById('tagsList');
     container.innerHTML = '';
@@ -1605,6 +2032,10 @@ function renderTagsEditor(tags) {
     });
 }
 
+/**
+ * Appends a blank contact row to the address-book editor (data-index -1 marks it new).
+ * @returns {void}
+ */
 function addNewContact() {
     const container = document.getElementById('contactsList');
     const item = document.createElement('div');
@@ -1618,6 +2049,10 @@ function addNewContact() {
     container.appendChild(item);
 }
 
+/**
+ * Appends a blank tag row to the tag-list editor (data-index -1 marks it new).
+ * @returns {void}
+ */
 function addNewTag() {
     const container = document.getElementById('tagsList');
     const item = document.createElement('div');
@@ -1629,6 +2064,11 @@ function addNewTag() {
     container.appendChild(item);
 }
 
+/**
+ * Removes the first address-book editor row whose inputs carry `data-index=index`.
+ * @param {number} index - Row index from renderContactsEditor, or -1 for new rows.
+ * @returns {void}
+ */
 function removeContactItem(index) {
     const item = document.querySelector(`.contact-item input[data-index="${index}"]`);
     if (item) {
@@ -1636,6 +2076,11 @@ function removeContactItem(index) {
     }
 }
 
+/**
+ * Removes the first tag editor row whose input carries `data-index=index`.
+ * @param {number} index - Row index from renderTagsEditor, or -1 for new rows.
+ * @returns {void}
+ */
 function removeTagItem(index) {
     const item = document.querySelector(`.tag-item input[data-index="${index}"]`);
     if (item) {
@@ -1643,6 +2088,10 @@ function removeTagItem(index) {
     }
 }
 
+/**
+ * Reads the address-book editor rows, skipping rows where every field is blank.
+ * @returns {Contact[]}
+ */
 function collectContactsFromEditor() {
     const contacts = [];
     const contactItems = document.querySelectorAll('.contact-item');
@@ -1664,6 +2113,10 @@ function collectContactsFromEditor() {
     return contacts;
 }
 
+/**
+ * Reads the non-blank, trimmed tag names from the tag-list editor.
+ * @returns {string[]}
+ */
 function collectTagsFromEditor() {
     const tags = [];
     const tagItems = document.querySelectorAll('.tag-item input');
@@ -1678,6 +2131,13 @@ function collectTagsFromEditor() {
     return tags;
 }
 
+/**
+ * POSTs the edited address book to /api/contacts/save, then closes the editor and
+ * reloads `contacts`. The server rejects contacts with no name, no email/SMS, an
+ * email without '@' or an SMS number without a leading '+'.
+ * @param {('json'|'env')} saveType - Persist to a JSON file or to the server's env file.
+ * @returns {Promise<void>}
+ */
 async function saveContacts(saveType) {
     const contacts = collectContactsFromEditor();
 
@@ -1707,6 +2167,11 @@ async function saveContacts(saveType) {
     }
 }
 
+/**
+ * POSTs the edited tag list to /api/tags/save, then closes the editor and reloads tags.
+ * @param {('json'|'env')} saveType - Persist to a JSON file or to the server's env file.
+ * @returns {Promise<void>}
+ */
 async function saveTags(saveType) {
     const tags = collectTagsFromEditor();
 
@@ -1740,18 +2205,39 @@ async function saveTags(saveType) {
 // Emoji Picker Functions
 // ============================================
 
+/**
+ * Id of the textarea the emoji picker was opened for, or null when closed.
+ * @type {?string}
+ */
 let currentEmojiTarget = null;
 
+/**
+ * Opens the emoji picker modal and records which textarea it was opened for.
+ * @param {string} targetId - Textarea id.
+ * @returns {void}
+ */
 function showEmojiPicker(targetId) {
     currentEmojiTarget = targetId;
     document.getElementById('emojiModal').classList.add('active');
 }
 
+/**
+ * Hides the emoji picker and forgets the target textarea.
+ * @returns {void}
+ */
 function closeEmojiModal() {
     document.getElementById('emojiModal').classList.remove('active');
     currentEmojiTarget = null;
 }
 
+/**
+ * Replaces the current selection in a textarea with an emoji, places the cursor
+ * after it, and closes the picker.
+ * @param {string} targetId - Textarea id (the emoji buttons in html.go hard-code
+ *     'consoleMessage').
+ * @param {string} emoji
+ * @returns {void}
+ */
 function insertEmoji(targetId, emoji) {
     const textarea = document.getElementById(targetId);
     if (textarea) {
@@ -1767,7 +2253,12 @@ function insertEmoji(targetId, emoji) {
     closeEmojiModal();
 }
 
-// Update emoji buttons to use the current target
+/**
+ * Update emoji buttons to use the current target: rewrites the 'consoleMessage'
+ * target in each emoji button's onclick to currentEmojiTarget. Note it runs once at
+ * DOMContentLoaded, when currentEmojiTarget is still null, so the rewrite is a no-op
+ * and every emoji is inserted into consoleMessage regardless of which picker opened the modal.
+ */
 document.addEventListener('DOMContentLoaded', function() {
     // Update emoji modal buttons to use current target
     const emojiModal = document.getElementById('emojiModal');
@@ -1780,4 +2271,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
+// Start immediately rather than on DOMContentLoaded: html.go loads this script at
+// the end of <body>, so the elements init() touches already exist.
 init();

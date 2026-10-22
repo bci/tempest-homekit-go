@@ -1,6 +1,18 @@
 // Package weather provides a client for the WeatherFlow Tempest API.
 // It handles authentication, data retrieval, and parsing of weather observations
 // and forecast data from WeatherFlow stations.
+//
+// It also defines the unified DataSource interface that every source of weather
+// observations implements, and its three implementations: APIDataSource (polls
+// the WeatherFlow REST API or a custom URL), UDPDataSource (wraps a local UDP
+// broadcast listener) and GeneratedDataSource (synthetic data straight from the
+// weather generator, for testing). StatusManager supplies station device status,
+// optionally scraped from the TempestWX web status page when enabled by a CLI
+// flag.
+//
+// Authentication is by personal access token, passed as a token query
+// parameter. The package-level HTTP helpers use http.Get (the default client,
+// with no timeout) and return metric units as delivered by the API.
 package weather
 
 import (
@@ -23,15 +35,36 @@ import (
 )
 
 const (
+	// BaseURL is the root of the WeatherFlow REST API.
 	BaseURL = "https://swd.weatherflow.com/swd/rest"
 )
 
+// Device is one device attached to a station, as listed by the stations
+// endpoint.
+//
+// Fields:
+//
+//   - DeviceID is the WeatherFlow device ID, used by the device observations
+//     endpoint.
+//   - DeviceType is the device kind: "ST" for a Tempest, "HB" for a hub, and
+//     "AR"/"SK" for the legacy AIR and SKY devices.
+//   - SerialNumber is the device serial, for example "ST-00012345".
 type Device struct {
 	DeviceID     int    `json:"device_id"`
 	DeviceType   string `json:"device_type"`
 	SerialNumber string `json:"serial_number"`
 }
 
+// Station is a WeatherFlow station as returned by the stations endpoints.
+//
+// Fields:
+//
+//   - StationID is the WeatherFlow station ID.
+//   - Name and StationName are both station names; the API sometimes populates
+//     only one, so lookups such as FindStationByName check both.
+//   - Latitude and Longitude are the station coordinates in decimal degrees
+//     (zero when unknown).
+//   - Devices lists the devices attached to the station.
 type Station struct {
 	StationID   int      `json:"station_id"`
 	Name        string   `json:"name"`
@@ -41,21 +74,37 @@ type Station struct {
 	Devices     []Device `json:"devices"`
 }
 
+// StationsResponse is the body of the GET /stations endpoint: every station the token can access.
 type StationsResponse struct {
 	Stations []Station `json:"stations"`
 }
 
+// StationDetailsResponse is the body of the GET /stations/{id} endpoint; Stations normally has one element.
 type StationDetailsResponse struct {
 	Stations []Station `json:"stations"`
 }
 
+// Observation is an alias for types.Observation, kept here so callers of this
+// package need not import pkg/types (which exists to break an import cycle).
 type Observation = types.Observation
 
+// ObservationResponse is the body of the station observations endpoint (and of
+// the generated-weather endpoint). Obs holds observations as name/value maps,
+// latest first.
 type ObservationResponse struct {
 	Obs []map[string]interface{} `json:"obs"`
 }
 
 // HistoricalResponse represents the structure for historical data from WeatherFlow API
+// (the device observations endpoint).
+//
+// Fields:
+//
+//   - Status is the API status object (status_code, status_message).
+//   - StationID, StationName and StationUnits describe the station and its
+//     display units.
+//   - Obs holds observations as positional arrays rather than maps; see
+//     parseDeviceObservations for the layout.
 type HistoricalResponse struct {
 	Status       map[string]interface{} `json:"status"`
 	StationID    int                    `json:"station_id"`
@@ -64,7 +113,13 @@ type HistoricalResponse struct {
 	Obs          [][]interface{}        `json:"obs"` // Device API returns array of arrays, not array of maps
 }
 
-// ForecastPeriod represents a single forecast period from the better_forecast API
+// ForecastPeriod represents a single forecast period from the better_forecast API:
+// either a daily forecast or the current conditions. Field names follow the
+// JSON keys; values are in the units the API was asked for (metric by
+// default). Time is Unix seconds; the probability and humidity fields are
+// percentages; Icon and PrecipIcon name WeatherFlow icon assets. Daily periods
+// fill AirTempHigh/AirTempLow, current conditions fill AirTemperature and
+// FeelsLike; absent fields stay zero.
 type ForecastPeriod struct {
 	Time              int64   `json:"time"`
 	Icon              string  `json:"icon"`
@@ -85,6 +140,14 @@ type ForecastPeriod struct {
 }
 
 // ForecastResponse represents the structure for forecast data from WeatherFlow API
+// (the better_forecast endpoint).
+//
+// Fields:
+//
+//   - Status is the API status object.
+//   - StationID, StationName and Timezone (an IANA name) describe the station.
+//   - Forecast.Daily lists the daily forecast periods, today first.
+//   - CurrentConditions is the API's current-conditions period.
 type ForecastResponse struct {
 	Status      map[string]interface{} `json:"status"`
 	StationID   int                    `json:"station_id"`
@@ -97,6 +160,8 @@ type ForecastResponse struct {
 }
 
 // GetStations retrieves all weather stations associated with the provided API token.
+// It returns an error if the request fails, the API answers with a non-200
+// status (for example 401 for a bad token), or the body is not valid JSON.
 func GetStations(token string) ([]Station, error) {
 	url := fmt.Sprintf("%s/stations?token=%s", BaseURL, token)
 	resp, err := http.Get(url)
@@ -123,13 +188,22 @@ func GetStations(token string) ([]Station, error) {
 	return stationsResp.Stations, nil
 }
 
-// GetObservation retrieves the latest weather observation for the specified station.
+// GetObservation retrieves the latest weather observation for the specified
+// station from the WeatherFlow station observations endpoint. Errors are as for
+// GetObservationFromURL.
 func GetObservation(stationID int, token string) (*Observation, error) {
 	url := fmt.Sprintf("%s/observations/station/%d?token=%s", BaseURL, stationID, token)
 	return GetObservationFromURL(url)
 }
 
 // GetObservationFromURL fetches weather data from a custom URL (e.g., generated weather endpoint)
+// that serves the station observations JSON shape, and converts the first (latest)
+// entry of obs into an Observation. Missing or non-numeric fields become zero;
+// the API's "brightness", "precip" and "precip_accum_local_day" keys map to
+// Illuminance, RainAccumulated and RainDailyTotal.
+//
+// It returns an error if the request fails, the status is not 200, the body is
+// not valid JSON, or obs is empty ("no observations found").
 func GetObservationFromURL(url string) (*Observation, error) {
 	resp, err := http.Get(url)
 	if err != nil {
@@ -182,6 +256,7 @@ func GetObservationFromURL(url string) (*Observation, error) {
 	return obs, nil
 }
 
+// getFloat64 returns value as a float64 if it is a JSON number (float64), and 0 for nil or any other type.
 func getFloat64(value interface{}) float64 {
 	if value == nil {
 		return 0.0
@@ -192,6 +267,7 @@ func getFloat64(value interface{}) float64 {
 	return 0.0
 }
 
+// getInt returns value truncated to an int if it is a JSON number (float64), and 0 for nil or any other type.
 func getInt(value interface{}) int {
 	if value == nil {
 		return 0
@@ -202,6 +278,9 @@ func getInt(value interface{}) int {
 	return 0
 }
 
+// GetStationDetails fetches a single station, including its device list, from
+// the GET /stations/{id} endpoint. It returns an error if the request fails, the
+// status is not 200, the body is not valid JSON or no station is returned.
 func GetStationDetails(stationID int, token string) (*Station, error) {
 	url := fmt.Sprintf("%s/stations/%d?token=%s", BaseURL, stationID, token)
 	resp, err := http.Get(url)
@@ -233,7 +312,8 @@ func GetStationDetails(stationID int, token string) (*Station, error) {
 }
 
 // FindStationByName searches for a station with the given name in the provided stations slice.
-// Returns nil if no matching station is found.
+// Returns nil if no matching station is found. Either Name or StationName may
+// match exactly (case-sensitive); the result points to a copy of the element.
 func FindStationByName(stations []Station, name string) *Station {
 	for _, s := range stations {
 		if s.Name == name || s.StationName == name {
@@ -243,7 +323,9 @@ func FindStationByName(stations []Station, name string) *Station {
 	return nil
 }
 
-// GetTempestDeviceID returns the first Tempest device ID from a station
+// GetTempestDeviceID returns the first Tempest device ID from a station: the
+// first device whose type is "ST". It returns an error if the station has no
+// Tempest device (for example a hub-only or AIR/SKY station).
 func GetTempestDeviceID(station *Station) (int, error) {
 	for _, device := range station.Devices {
 		if device.DeviceType == "ST" { // ST = Tempest
@@ -253,15 +335,29 @@ func GetTempestDeviceID(station *Station) (int, error) {
 	return 0, fmt.Errorf("no Tempest device found in station")
 }
 
-// ProgressCallback is a function type for reporting progress during historical data loading
+// ProgressCallback is a function type for reporting progress during historical
+// data loading: currentStep of totalSteps completed, with a human-readable
+// description of the step.
 type ProgressCallback func(currentStep, totalSteps int, description string)
 
 // GetHistoricalObservations fetches historical weather data using the device-based endpoint with day_offset
+// for today and yesterday, keeping at most 1000 points and reporting no
+// progress. See GetHistoricalObservationsWithProgress.
 func GetHistoricalObservations(stationID int, token string, logLevel string) ([]*Observation, error) {
 	return GetHistoricalObservationsWithProgress(stationID, token, logLevel, nil, 1000)
 }
 
-// GetHistoricalObservationsWithProgress fetches historical weather data with progress reporting
+// GetHistoricalObservationsWithProgress fetches historical weather data with progress reporting.
+//
+// It resolves the station's Tempest device, then fetches the device
+// observations for today and yesterday (day_offset 0 and 1), pausing briefly
+// between requests to respect the API. Per-day failures are printed and
+// skipped rather than returned. The result is sorted newest first, de-duplicated
+// by timestamp and truncated to maxPoints (0 or less means no limit).
+// progressCallback may be nil. logLevel "debug" prints diagnostics to stdout.
+//
+// It returns an error only if the station details or its Tempest device cannot
+// be found.
 func GetHistoricalObservationsWithProgress(stationID int, token string, logLevel string, progressCallback ProgressCallback, maxPoints int) ([]*Observation, error) {
 	// First get station details to find the Tempest device ID
 	stationDetails, err := GetStationDetails(stationID, token)
@@ -440,6 +536,9 @@ func GetHistoricalObservationsWithProgress(stationID int, token string, logLevel
 // [6]: station_pressure, [7]: air_temperature, [8]: relative_humidity, [9]: illuminance,
 // [10]: uv, [11]: solar_radiation, [12]: rain_accumulated, [13]: precipitation_type,
 // [14]: lightning_strike_avg_distance, [15]: lightning_strike_count, [16]: battery, [17]: report_interval
+//
+// Arrays with fewer than 18 elements are skipped, and null or non-numeric
+// values become zero. The input order is preserved.
 func parseDeviceObservations(obsData [][]interface{}) []*Observation {
 	var observations []*Observation
 
@@ -476,6 +575,10 @@ func parseDeviceObservations(obsData [][]interface{}) []*Observation {
 
 // filterToOneMinuteIncrements filters observations to get approximately count points
 // spaced one minute apart, working backwards from the most recent observation
+//
+// It sorts observations in place (newest first), keeps each observation at
+// least 60 seconds older than the last one kept until maxCount are selected,
+// and returns them oldest first for charting.
 func filterToOneMinuteIncrements(observations []*Observation, maxCount int) []*Observation {
 	if len(observations) == 0 {
 		return observations
@@ -511,11 +614,13 @@ func filterToOneMinuteIncrements(observations []*Observation, maxCount int) []*O
 	return filtered
 }
 
-// package-level no-op reference to avoid static analyzer warnings when the helper
+// Package-level no-op reference to avoid static analyzer warnings when the helper
 // function is currently unused. It is kept for future use by charting logic.
 var _ = filterToOneMinuteIncrements
 
 // GetForecast fetches forecast data from the WeatherFlow better_forecast endpoint
+// for stationID. It returns an error if the request fails, the status is not 200,
+// or the body cannot be read or parsed.
 func GetForecast(stationID int, token string) (*ForecastResponse, error) {
 	url := fmt.Sprintf("%s/better_forecast?station_id=%d&token=%s", BaseURL, stationID, token)
 
@@ -546,6 +651,23 @@ func GetForecast(stationID int, token string) (*ForecastResponse, error) {
 // querying the device observations endpoint with increasing day_offset values
 // until no more data is returned or maxDays is reached. maxPoints limits the
 // total returned observations (0 = no limit).
+//
+// maxDays of 0 or less defaults to 365; collection also stops after three
+// consecutive empty or failed days. Rate-limit (HTTP 429) responses are retried
+// up to six times, honouring Retry-After or else backing off exponentially
+// with jitter (capped at 60 s). The result is sorted newest first and
+// de-duplicated by timestamp before reduction.
+//
+// reduceMethod selects an optional reduction (case-insensitive):
+//   - "timebin" keeps every point from the last keepRecentHours at full
+//     resolution and averages older points into binMinutes-wide bins (default
+//     10 minutes) stamped with the bin start; gusts take the bin maximum and
+//     rain and lightning counts are summed.
+//   - "factor" averages each consecutive group of reduceFactor points.
+//   - anything else returns the points unreduced.
+//
+// logLevel "debug" prints diagnostics to stdout. It returns an error only if
+// the station details or its Tempest device cannot be found.
 func GetAllHistoricalObservations(stationID int, token string, logLevel string, maxDays int, reduceMethod string, binMinutes int, keepRecentHours int, reduceFactor int, maxPoints int) ([]*Observation, error) {
 	// Resolve station details and Tempest device ID
 	stationDetails, err := GetStationDetails(stationID, token)
@@ -906,6 +1028,21 @@ func GetAllHistoricalObservations(stationID int, token string, logLevel string, 
 }
 
 // StationStatus represents the status information from the TempestWX station status page
+// (hub and device diagnostics). All values are display strings as shown on the
+// page, for example "Good (-63)" for a signal or "63d 13h 6m 1s" for an uptime;
+// fields that could not be found are empty.
+//
+// Fields:
+//
+//   - HubNetworkStatus, HubLastStatus, HubWiFiSignal, HubSerialNumber,
+//     HubFirmware and HubUptime describe the hub.
+//   - DeviceNetworkStatus, DeviceLastObs, DeviceSignal, DeviceSerialNumber,
+//     DeviceFirmware and DeviceUptime describe the Tempest device.
+//   - BatteryVoltage (for example "2.69V") and BatteryStatus (for example
+//     "Good") describe the device battery.
+//   - SensorStatus is the overall sensor health text.
+//   - DataSource, LastScraped and ScrapingEnabled are metadata for tracking
+//     data source and freshness, see their inline comments.
 type StationStatus struct {
 	HubNetworkStatus    string `json:"hubNetworkStatus"`
 	HubLastStatus       string `json:"hubLastStatus"`
@@ -929,6 +1066,9 @@ type StationStatus struct {
 }
 
 // GetStationStatus scrapes the TempestWX station status page for detailed device information
+// using a plain HTTP GET. The page fills its diagnostics in with JavaScript, so
+// this may find little; GetStationStatusWithBrowser renders the page first. It
+// returns an error if the request fails or the status is not 200.
 func GetStationStatus(stationID int, logLevel string) (*StationStatus, error) {
 	url := fmt.Sprintf("https://tempestwx.com/settings/station/%d/status", stationID)
 
@@ -980,6 +1120,11 @@ func GetStationStatus(stationID int, logLevel string) (*StationStatus, error) {
 }
 
 // parseStationStatusHTML parses the HTML content from the TempestWX station status page
+// by matching each "lv-param-label" / "lv-value-display" span pair with a
+// regular expression. Rows that appear for both hub and device (uptime,
+// network status, firmware) are assigned by order, hub first; serial numbers
+// are assigned by their HB-/ST- prefix. Missing rows leave fields empty. The
+// error result is currently always nil.
 func parseStationStatusHTML(html string, logLevel string) (*StationStatus, error) {
 	status := &StationStatus{}
 
@@ -1109,7 +1254,14 @@ func parseStationStatusHTML(html string, logLevel string) (*StationStatus, error
 }
 
 // GetStationStatusWithBrowser uses a headless browser to scrape the TempestWX status page
-// This version waits for JavaScript to load the content before parsing
+// This version waits for JavaScript to load the content before parsing.
+//
+// It launches headless Chrome through chromedp (which must be installed), waits
+// for the diagnostics list to become visible plus three seconds, and parses the
+// #diagnostic-info section with parseStationStatusHTML. The whole operation is
+// bounded by a 30 second timeout. On success LastScraped is set to the current
+// UTC time and ScrapingEnabled to true. It returns an error if the browser
+// cannot be started, navigation or waiting fails, or parsing fails.
 func GetStationStatusWithBrowser(stationID int, logLevel string) (*StationStatus, error) {
 	url := fmt.Sprintf("https://tempestwx.com/settings/station/%d/status", stationID)
 

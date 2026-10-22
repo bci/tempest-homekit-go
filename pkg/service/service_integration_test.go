@@ -12,6 +12,7 @@ import (
 // fakeDataSource is a minimal implementation of weather.DataSource used for tests.
 type fakeDataSource struct{}
 
+// Start returns a channel that delivers two observations about 5 ms apart and then closes, so StartService returns.
 func (f *fakeDataSource) Start() (<-chan weather.Observation, error) {
 	ch := make(chan weather.Observation)
 	go func() {
@@ -30,23 +31,29 @@ func (f *fakeDataSource) Start() (<-chan weather.Observation, error) {
 	return ch, nil
 }
 
+// Stop is a no-op for the test.
 func (f *fakeDataSource) Stop() error {
 	// no-op for test
 	return nil
 }
 
+// GetLatestObservation returns a fresh observation at 21 deg C.
 func (f *fakeDataSource) GetLatestObservation() *weather.Observation {
 	return &weather.Observation{Timestamp: time.Now().Unix(), AirTemperature: 21.0}
 }
 
+// GetForecast always returns nil.
 func (f *fakeDataSource) GetForecast() *weather.ForecastResponse { return nil }
 
+// GetStatus reports an active generated source with two observations.
 func (f *fakeDataSource) GetStatus() weather.DataSourceStatus {
 	return weather.DataSourceStatus{Type: weather.DataSourceGenerated, Active: true, LastUpdate: time.Now(), ObservationCount: 2}
 }
 
+// GetType reports DataSourceGenerated.
 func (f *fakeDataSource) GetType() weather.DataSourceType { return weather.DataSourceGenerated }
 
+// TestStartService_WithFakeDataSource checks, from outside the package, that StartService processes a fake source with HomeKit and the web console disabled and returns nil when it closes.
 func TestStartService_WithFakeDataSource(t *testing.T) {
 	// Override factory and restore after test
 	orig := svc.DataSourceFactory

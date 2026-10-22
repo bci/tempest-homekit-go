@@ -20,7 +20,10 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
-// chromedpAvailable checks if Chrome/Chromium is available for headless testing
+// chromedpAvailable checks if Chrome/Chromium is available for headless testing.
+//
+// It launches a headless browser and navigates to about:blank within a 2-second
+// timeout, returning false on any failure so callers can t.Skip instead of failing.
 func chromedpAvailable() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

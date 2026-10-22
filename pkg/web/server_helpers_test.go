@@ -8,6 +8,8 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
+// TestCalculateSeaLevelPressure_Basic checks that calculateSeaLevelPressure
+// returns a positive, non-NaN value for typical inputs.
 func TestCalculateSeaLevelPressure_Basic(t *testing.T) {
 	// Use known values to ensure output is reasonable
 	stationPressure := 1000.0 // mb
@@ -20,6 +22,8 @@ func TestCalculateSeaLevelPressure_Basic(t *testing.T) {
 	}
 }
 
+// TestGetPressureDescription_Basic checks the Low, High and Normal pressure
+// bands.
 func TestGetPressureDescription_Basic(t *testing.T) {
 	if getPressureDescription(970) != "Low" {
 		t.Fatalf("expected Low for 970")
@@ -32,6 +36,8 @@ func TestGetPressureDescription_Basic(t *testing.T) {
 	}
 }
 
+// TestGetPressureTrendAndForecast checks that a steadily rising history is
+// "Rising" and yields a non-empty forecast.
 func TestGetPressureTrendAndForecast(t *testing.T) {
 	// Build a history that trends up
 	now := time.Now()
@@ -51,6 +57,8 @@ func TestGetPressureTrendAndForecast(t *testing.T) {
 	}
 }
 
+// TestCalculateDailyRainForTime_Basic checks that calculateDailyRainForTime
+// reports positive rain for an increasing history.
 func TestCalculateDailyRainForTime_Basic(t *testing.T) {
 	ws := &WebServer{}
 	// create history for today with increasing rain accumulation

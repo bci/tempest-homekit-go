@@ -7,6 +7,10 @@ import (
 )
 
 // fakeGeneratorConfig configures deterministic behavior for the fake generator used in tests.
+//
+// Each field is returned verbatim by the matching fakeGenerator method: LocationName and
+// ClimateZone by GetLocation, Season by GetSeason, DailyRainTotal by GetDailyRainTotal
+// and Observation by GenerateObservation.
 type fakeGeneratorConfig struct {
 	LocationName   string
 	Season         generator.Season
@@ -20,6 +24,8 @@ type fakeGenerator struct {
 	cfg *fakeGeneratorConfig
 }
 
+// newFakeGenerator returns a fakeGenerator using cfg, or a default "Test"/"Temperate"
+// configuration with zero rain and an empty observation when cfg is nil.
 func newFakeGenerator(cfg *fakeGeneratorConfig) *fakeGenerator {
 	if cfg == nil {
 		cfg = &fakeGeneratorConfig{
@@ -33,6 +39,15 @@ func newFakeGenerator(cfg *fakeGeneratorConfig) *fakeGenerator {
 	return &fakeGenerator{cfg: cfg}
 }
 
+// GenerateNewSeason is a no-op so tests see a stable location and season.
+//
+// It and the adjacent methods below implement WeatherGeneratorInterface (they
+// are kept without separating comments so gofmt keeps their layout):
+// GetLocation returns a Location built from the configured name and climate
+// zone, GetSeason returns the configured season, GetDailyRainTotal returns the
+// configured rain total, SetCurrentWeatherMode is a no-op, and
+// GenerateObservation returns the configured observation pointer (the same one
+// on every call).
 func (f *fakeGenerator) GenerateNewSeason() {
 	// no-op for deterministic tests
 }
@@ -44,6 +59,8 @@ func (f *fakeGenerator) GetDailyRainTotal() float64                { return f.cf
 func (f *fakeGenerator) SetCurrentWeatherMode()                    {}
 func (f *fakeGenerator) GenerateObservation() *weather.Observation { return f.cfg.Observation }
 
+// GetLocationWithClimate returns the same Location as GetLocation.
+//
 // Provide climate zone via Location if requested by tests
 func (f *fakeGenerator) GetLocationWithClimate() generator.Location {
 	loc := generator.Location{Name: f.cfg.LocationName}

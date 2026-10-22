@@ -1,3 +1,10 @@
+/**
+ * @module alarm-compact-persistence.test
+ * @description Integration test for the dashboard alarm list's compact mode: loads the
+ * real ../script.js into a fresh JSDOM page with a mocked localStorage and checks that
+ * an alarm expanded by the user stays expanded across re-renders, via the
+ * 'alarm-expanded-set' localStorage key.
+ */
 const fs = require('fs');
 const path = require('path');
 
@@ -5,12 +12,21 @@ const path = require('path');
 const { JSDOM } = require('jsdom');
 
 // Load the script module (it exports updateAlarmStatus for tests)
+/** Absolute path of the dashboard script under test. @type {string} */
 const scriptPath = path.resolve(__dirname, '..', 'script.js');
+/** updateAlarmStatus from the freshly required script; reset after each test. @type {?Function} */
 let updateAlarmStatus;
 
+/**
+ * Compact-mode expand state survives re-rendering.
+ */
 describe('Alarm compact persistence', () => {
     let dom;
 
+    /**
+     * Builds a new JSDOM page and mock localStorage, exposes them as globals, and
+     * re-requires script.js so it binds to them.
+     */
     beforeEach(() => {
         // Create a fresh DOM for each test
         dom = new JSDOM(`<!doctype html><html><body>
@@ -44,6 +60,9 @@ describe('Alarm compact persistence', () => {
     global.localStorage.clear();
     });
 
+    /**
+     * Removes the globals installed by beforeEach.
+     */
     afterEach(() => {
         // Cleanup globals
         delete global.window;
@@ -52,6 +71,10 @@ describe('Alarm compact persistence', () => {
         updateAlarmStatus = null;
     });
 
+    /**
+     * Clicking an item's expand button in compact mode adds 'expanded', records the
+     * alarm name in 'alarm-expanded-set', and a second render keeps it expanded.
+     */
     test('persists expanded state across render', () => {
         const sample = {
             enabled: true,

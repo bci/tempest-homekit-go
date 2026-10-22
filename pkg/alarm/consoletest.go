@@ -9,7 +9,13 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
-// TestConsoleConfiguration tests console notification by sending a test message
+// TestConsoleConfiguration tests console notification by sending a test message.
+//
+// alarmsJSON is the alarm config input accepted by [LoadAlarmConfig] (it must
+// load and validate, because the notifier is built through the real
+// [NotifierFactory] path); stationName fills {{station}}. It prints a sample
+// observation rendered through a console channel between separator lines and
+// returns an error if the config fails to load or the send fails.
 func TestConsoleConfiguration(alarmsJSON, stationName string) error {
 	fmt.Println("Testing console notification output...")
 	fmt.Println()
@@ -65,7 +71,8 @@ func TestConsoleConfiguration(alarmsJSON, stationName string) error {
 	return nil
 }
 
-// RunConsoleTest is a convenience function that wraps TestConsoleConfiguration and exits
+// RunConsoleTest is a convenience function that wraps TestConsoleConfiguration and exits.
+// It never returns: it calls os.Exit(0) on success and log.Fatalf on failure.
 func RunConsoleTest(alarmsJSON, stationName string) {
 	if err := TestConsoleConfiguration(alarmsJSON, stationName); err != nil {
 		log.Fatalf("Console test failed: %v", err)

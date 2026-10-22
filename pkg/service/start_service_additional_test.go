@@ -9,9 +9,12 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
-// fakeDataSource implements weather.DataSource for tests
+// fakeDataSource implements weather.DataSource for tests; its channel delivers
+// two observations and then closes. Stop is a no-op and GetType reports
+// DataSourceGenerated.
 type fakeDataSource struct{}
 
+// Start returns a channel that delivers two observations and then closes.
 func (f *fakeDataSource) Start() (<-chan weather.Observation, error) {
 	ch := make(chan weather.Observation)
 	go func() {
@@ -32,9 +35,10 @@ func (f *fakeDataSource) GetStatus() weather.DataSourceStatus {
 }
 func (f *fakeDataSource) GetType() weather.DataSourceType { return weather.DataSourceGenerated }
 
-// failingStartDS returns an error on Start()
+// failingStartDS returns an error on Start(); its other methods return zero values.
 type failingStartDS struct{}
 
+// Start always fails with "start failed".
 func (f *failingStartDS) Start() (<-chan weather.Observation, error) {
 	return nil, errors.New("start failed")
 }
@@ -46,6 +50,7 @@ func (f *failingStartDS) GetStatus() weather.DataSourceStatus {
 }
 func (f *failingStartDS) GetType() weather.DataSourceType { return weather.DataSourceGenerated }
 
+// TestStartService_WithFakeDataSource checks that StartService processes a fake source in generated mode and returns nil when it closes.
 func TestStartService_WithFakeDataSource(t *testing.T) {
 	orig := DataSourceFactory
 	defer func() { DataSourceFactory = orig }()
@@ -67,6 +72,7 @@ func TestStartService_WithFakeDataSource(t *testing.T) {
 	}
 }
 
+// TestStartService_FactoryError checks that a data source factory error is returned by StartService.
 func TestStartService_FactoryError(t *testing.T) {
 	orig := DataSourceFactory
 	defer func() { DataSourceFactory = orig }()
@@ -81,6 +87,7 @@ func TestStartService_FactoryError(t *testing.T) {
 	}
 }
 
+// TestStartService_DataSourceStartError checks that a data source Start error is returned by StartService.
 func TestStartService_DataSourceStartError(t *testing.T) {
 	orig := DataSourceFactory
 	defer func() { DataSourceFactory = orig }()

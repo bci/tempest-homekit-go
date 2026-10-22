@@ -1,12 +1,27 @@
 /* eslint-env jest */
+/**
+ * @module tag-select-change.integration.test
+ * @description Integration test: renders alarms with the real ../script.js
+ * updateAlarmStatus and checks that changing the generated tag <select> persists the
+ * choice to localStorage and writes it into the page URL.
+ */
 const path = require('path');
 const { JSDOM } = require('jsdom');
 
+/**
+ * Change events on the alarm tag select.
+ */
 describe('tag select UI interaction', () => {
+  /** Absolute path of the dashboard script under test. @type {string} */
   const scriptPath = path.resolve(__dirname, '../script.js');
 
+  /** Globals saved before each test so afterEach can restore them. */
   let _origWindow, _origDocument, _origLocalStorage, _origFetch;
 
+  /**
+   * Restores (or deletes) the window/document/localStorage/fetch globals and clears
+   * the module registry.
+   */
   afterEach(() => {
     if (typeof _origWindow !== 'undefined') global.window = _origWindow; else delete global.window;
     if (typeof _origDocument !== 'undefined') global.document = _origDocument; else delete global.document;
@@ -15,6 +30,10 @@ describe('tag select UI interaction', () => {
     jest.resetModules();
   });
 
+  /**
+   * Selecting 'driveway' overwrites the persisted 'garage' and adds tag=driveway to
+   * the URL.
+   */
   test('changing the tag select updates localStorage and URL', () => {
     const dom = new JSDOM('<!doctype html><html><body><div id="alarm-list"><div class="alarm-list-header">Active Alarms</div></div></body></html>', { url: 'http://localhost/' });
     const { window } = dom;

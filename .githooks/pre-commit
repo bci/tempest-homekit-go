@@ -4,6 +4,19 @@ set -euo pipefail
 # Pre-commit hook:
 # - Format staged Go files with gofmt (and restage them)
 # - If JS files are staged, run `npm test` (silent) and fail commit if tests fail
+#
+# Git runs this hook from the repository root before every commit once hooks
+# are enabled with `git config core.hooksPath .githooks` (see AGENTS.md).
+#
+# Usage: invoked by git; no arguments. Bypass once with `git commit --no-verify`.
+#
+# Only added, copied and modified files are considered (--diff-filter=ACM), so
+# deletions and renames never trigger formatting or tests. Each staged .go file
+# is rewritten in place with `gofmt -s -w` and then re-added with `git add`;
+# because the whole file is re-added, any unstaged hunks in that file are
+# staged too. With `set -euo pipefail`, a non-zero `npm test` aborts the hook
+# and therefore the commit. If npm is not on PATH the JS tests are skipped with
+# a message rather than failing. Exits 0 when every check passes.
 
 echo "Running pre-commit checks..."
 

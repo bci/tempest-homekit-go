@@ -9,8 +9,9 @@ import (
 	"time"
 )
 
-// helper that temporarily overrides http.DefaultTransport to route requests
-// to the provided test server. It returns a function to restore the transport.
+// overrideDefaultTransportToServer temporarily overrides http.DefaultTransport to
+// route requests to the provided test server. It returns a function to restore
+// the transport.
 func overrideDefaultTransportToServer(srv *httptest.Server) func() {
 	old := http.DefaultTransport
 	target, _ := url.Parse(srv.URL)
@@ -25,10 +26,13 @@ func overrideDefaultTransportToServer(srv *httptest.Server) func() {
 	return func() { http.DefaultTransport = old }
 }
 
+// roundTripperFunc adapts a function to the http.RoundTripper interface.
 type roundTripperFunc func(*http.Request) (*http.Response, error)
 
+// RoundTrip calls f.
 func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
+// TestGetStationDetails_Success checks that GetStationDetails decodes a station by ID.
 func TestGetStationDetails_Success(t *testing.T) {
 	// Create a mock StationDetailsResponse
 	resp := StationDetailsResponse{
@@ -53,6 +57,7 @@ func TestGetStationDetails_Success(t *testing.T) {
 	}
 }
 
+// TestGetHistoricalObservationsWithProgress_Success checks that observations are returned and the progress callback is invoked.
 func TestGetHistoricalObservationsWithProgress_Success(t *testing.T) {
 	// Mock station details response to return a device of type ST
 	stationResp := StationDetailsResponse{

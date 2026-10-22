@@ -2,6 +2,15 @@
 
 # Tempest HomeKit Go Cross-Platform Service Installation Script
 # Supports Linux (systemd), macOS (launchd), and Windows (Windows Service)
+#
+# Installs a prebuilt binary from build/ (run ./scripts/build.sh first) as a
+# system service, under /opt/tempest-homekit-go with configuration in
+# /etc/tempest-homekit-go/config.env and logs in /var/log/tempest-homekit-go
+# (Windows: Program Files / ProgramData). Requires root on Linux and macOS and
+# NSSM on Windows. Re-running overwrites the binary and the service definition
+# but keeps an existing config.env. Undo with ./scripts/remove-service.sh.
+#
+# Usage: sudo ./scripts/install-service.sh    (from any directory; no arguments)
 
 set -e
 
@@ -12,24 +21,86 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+#######################################
 # Function to print colored output
+# Print a message prefixed with a blue [INFO] tag.
+# Globals:
+#   BLUE, NC (read): ANSI color escape codes.
+# Arguments:
+#   $1 - Message text.
+# Outputs:
+#   Writes the tagged message to stdout (echo -e, so backslash escapes in $1
+#   are interpreted).
+# Returns:
+#   0.
+#######################################
 print_status() {
     echo -e "${BLUE}[INFO]${NC} $1"
 }
 
+#######################################
+# Print a message prefixed with a green [SUCCESS] tag.
+# Globals:
+#   GREEN, NC (read): ANSI color escape codes.
+# Arguments:
+#   $1 - Message text.
+# Outputs:
+#   Writes the tagged message to stdout (echo -e, so backslash escapes in $1
+#   are interpreted).
+# Returns:
+#   0.
+#######################################
 print_success() {
     echo -e "${GREEN}[SUCCESS]${NC} $1"
 }
 
+#######################################
+# Print a message prefixed with a yellow [WARNING] tag.
+# Globals:
+#   YELLOW, NC (read): ANSI color escape codes.
+# Arguments:
+#   $1 - Message text.
+# Outputs:
+#   Writes the tagged message to stdout (echo -e, so backslash escapes in $1
+#   are interpreted).
+# Returns:
+#   0.
+#######################################
 print_warning() {
     echo -e "${YELLOW}[WARNING]${NC} $1"
 }
 
+#######################################
+# Print a message prefixed with a red [ERROR] tag.
+# Globals:
+#   RED, NC (read): ANSI color escape codes.
+# Arguments:
+#   $1 - Message text.
+# Outputs:
+#   Writes the tagged message to stdout (echo -e, so backslash escapes in $1
+#   are interpreted).
+# Returns:
+#   0.
+#######################################
 print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+#######################################
 # Detect OS
+# Identifies the host operating system family from `uname -s`.
+# A Linux kernel is reported as "wsl" when /proc/version contains
+# "Microsoft". The match is case-sensitive, so WSL2 kernels (which report
+# lower-case "microsoft") are reported as "linux".
+# Globals:
+#   None
+# Arguments:
+#   None
+# Outputs:
+#   Writes one of: wsl, linux, macos, windows, unknown to stdout.
+# Returns:
+#   0.
+#######################################
 detect_os() {
     case "$(uname -s)" in
         Linux)
@@ -51,7 +122,31 @@ detect_os() {
     esac
 }
 
+#######################################
 # Install on Linux (systemd)
+# Installs the binary as a systemd service running as user "tempest".
+# Copies build/tempest-homekit-go-linux-amd64 (always amd64, even on arm64
+# hosts) to /opt/tempest-homekit-go, writes and enables
+# /etc/systemd/system/tempest-homekit-go.service (overwriting any existing
+# unit), creates the system user "tempest" if missing, and creates
+# /etc/tempest-homekit-go/config.env with placeholder values only if it does
+# not exist. The service is enabled but not started.
+# The unit runs with ProtectSystem=strict and only /var/log/tempest-homekit-go
+# writable, so the working directory /opt/tempest-homekit-go is read-only to
+# the service. The generated config.env sets WEATHERFLOW_TOKEN, but the
+# application reads its token from TEMPEST_TOKEN.
+# Globals:
+#   EUID (read). SCRIPT_DIR, PROJECT_DIR, INSTALL_DIR, CONFIG_DIR, LOG_DIR
+#   (set).
+# Arguments:
+#   None
+# Outputs:
+#   Writes progress and next-step hints to stdout; creates the files and
+#   directories above.
+# Returns:
+#   0 on success; exits 1 if not run as root or the binary is missing, and
+#   exits non-zero (via `set -e`) if any install command fails.
+#######################################
 install_linux() {
     print_status "Installing on Linux (systemd)..."
 
@@ -165,7 +260,29 @@ EOF
     print_status "To view logs: sudo journalctl -u tempest-homekit-go -f"
 }
 
+#######################################
 # Install on macOS (launchd)
+# Installs the binary as a launchd daemon (label com.tempest.homekit).
+# Copies build/tempest-homekit-go-macos-<arch> (arch from `uname -m`, x86_64
+# mapped to amd64) to /opt/tempest-homekit-go, writes
+# /Library/LaunchDaemons/com.tempest.homekit.plist (RunAtLoad, KeepAlive,
+# running as root, logs under /var/log/tempest-homekit-go), creates
+# /etc/tempest-homekit-go/config.env if missing, then `launchctl load`s the
+# plist, which starts the daemon immediately.
+# The plist does not reference config.env, so the settings written there are
+# not passed to the daemon.
+# Globals:
+#   EUID (read). SCRIPT_DIR, PROJECT_DIR, INSTALL_DIR, CONFIG_DIR, LOG_DIR
+#   (set).
+# Arguments:
+#   None
+# Outputs:
+#   Writes progress and next-step hints to stdout; creates the files and
+#   directories above.
+# Returns:
+#   0 on success; exits 1 if not run as root or the binary is missing, and
+#   exits non-zero (via `set -e`) if any install command fails.
+#######################################
 install_macos() {
     print_status "Installing on macOS (launchd)..."
 
@@ -267,7 +384,30 @@ EOF
     print_status "To view logs: tail -f $LOG_DIR/tempest-homekit-go.log"
 }
 
+#######################################
 # Install on Windows
+# Installs the binary as a Windows service named TempestHomeKit via NSSM.
+# Copies build/tempest-homekit-go-windows-amd64.exe to
+# "/c/Program Files/Tempest HomeKit Go", registers it with `nssm install`,
+# sets its working directory and stdout/stderr log files under
+# "/c/ProgramData/Tempest HomeKit Go/logs", creates config.env there if
+# missing, and sets CONFIG_FILE=<config.env path> in the service environment.
+# The application does not read CONFIG_FILE (it loads ENV_FILE, default
+# .env), so config.env is not used by the service. No administrator check is
+# made; failures surface from mkdir/cp/nssm.
+# Globals:
+#   SCRIPT_DIR, PROJECT_DIR, INSTALL_DIR, CONFIG_DIR, LOG_DIR (set).
+# Arguments:
+#   None
+# Outputs:
+#   Writes progress to stdout; if nssm is not on PATH, prints manual
+#   installation steps instead.
+# Returns:
+#   0 on success; exits 1 if the binary is missing or nssm is not installed
+#   (after the binary has already been copied), and exits non-zero (via
+#   `set -e`) if any command fails, e.g. `nssm install` when the service
+#   already exists.
+#######################################
 install_windows() {
     print_status "Installing on Windows..."
 
@@ -349,7 +489,19 @@ EOF
     print_status "To view logs: type \"$LOG_DIR/tempest-homekit-go.log\""
 }
 
+#######################################
 # Main installation function
+# Detects the OS and dispatches to the matching install_* function.
+# WSL is treated as Linux.
+# Globals:
+#   OS (set).
+# Arguments:
+#   $@ - Accepted but ignored.
+# Outputs:
+#   Writes progress and a closing checklist to stdout.
+# Returns:
+#   0 on success; exits 1 on an unsupported OS or when an installer exits.
+#######################################
 main() {
     echo "🌤️ Installing Tempest HomeKit Go Service..."
 

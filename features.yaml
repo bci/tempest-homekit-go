@@ -1,0 +1,105 @@
+# features.yaml — what exists and what is planned in tempest-homekit-go.
+#
+# Created 2026-10-16 during the overnight documentation pass, from README.md, VERSIONS.md
+# and the code on main. Ids are stable: never renumber; a new feature takes the next free id.
+#
+# Status values used here:
+#   complete  - seen working (not just shipped).
+#   shipped   - released per VERSIONS.md and covered by unit tests that pass, but NOT seen
+#               working end to end against a real station, HomeKit hub or provider in the
+#               2026-10-16 pass. Kent should promote these to `complete` (or demote them)
+#               from his own experience; nobody has verified them for this file.
+#   in-dev    - partly built or built with a known failure (see notes).
+#   planned   - not started on main.
+
+features:
+  - id: FEAT-0001
+    name: WeatherFlow REST API data source
+    status: shipped
+    notes: --token + --station; polls observations every 60 s (pkg/weather, datasource_api.go).
+
+  - id: FEAT-0002
+    name: HomeKit bridge with weather sensor accessories
+    status: shipped
+    notes: >
+      brutella/hap bridge; pairing state in ./db, --cleardb resets it. Pressure and UV are
+      exposed as Light Sensor services (shown in lux in the Home app) — a HomeKit limitation.
+
+  - id: FEAT-0003
+    name: Web dashboard with charts, pop-out charts and unit conversion
+    status: shipped
+    notes: >
+      pkg/web server + pkg/web/static/script.js. Headless-Chrome UI tests in pkg/web pass
+      (2026-10-16). pkg/web/static/date-fns.min.js holds an HTTP "Not found" body, not the
+      library; the dashboard uses the bundled chartjs adapter instead.
+
+  - id: FEAT-0004
+    name: UDP stream / offline mode
+    status: shipped
+    notes: --udp-stream listens on UDP 50222; --disable-internet for full offline operation.
+
+  - id: FEAT-0005
+    name: Generated (synthetic) weather and custom station URL
+    status: shipped
+    notes: --use-generated-weather, --station-url; used for UI testing without a station.
+
+  - id: FEAT-0006
+    name: Historical data preload
+    status: shipped
+    notes: --history-read with HISTORY_* reduction settings (API mode only).
+
+  - id: FEAT-0007
+    name: TempestWX device status scraping
+    status: shipped
+    notes: --use-web-status; needs Chrome/Chromium (chromedp) with HTTP and API fallbacks.
+
+  - id: FEAT-0008
+    name: Alarm rules engine
+    status: shipped
+    notes: >
+      Threshold conditions, AND/OR, change-detection operators (*field, >field, <field),
+      cooldowns, templated messages, per-alarm schedules (time ranges, weekdays,
+      sunrise/sunset), live reload on file change.
+
+  - id: FEAT-0009
+    name: Alarm notification channels
+    status: shipped
+    notes: >
+      console, syslog, oslog (macOS), eventlog (Windows), email (SMTP or Microsoft 365 Graph),
+      SMS (Twilio or AWS SNS), webhook, CSV and JSON file. --test-* flags send one test
+      notification per channel. None were exercised against a real provider on 2026-10-16.
+
+  - id: FEAT-0010
+    name: Standalone web alarm editor
+    status: shipped
+    notes: --alarms-edit @file.json (default port 8081).
+
+  - id: FEAT-0011
+    name: Terminal status console
+    status: shipped
+    notes: --status; tview-based TUI with themes (pkg/status, 14.6% test coverage).
+
+  - id: FEAT-0012
+    name: Cross-platform build and service install scripts
+    status: shipped
+    notes: scripts/build.sh, build-cross-platform.sh, install-service.sh, remove-service.sh.
+
+  - id: FEAT-0013
+    name: Container deployment (Docker / docker-compose)
+    status: in-dev
+    notes: Not on main; work in progress on Kent's container-implementation branch.
+
+  - id: FEAT-0014
+    name: Multi-station monitoring
+    status: planned
+    notes: README roadmap, "In Progress / Medium Priority"; no code on main.
+
+  - id: FEAT-0015
+    name: Multi-tenant UI
+    status: planned
+    notes: README roadmap, long-term.
+
+  - id: FEAT-0016
+    name: Database (MariaDB/MySQL) alarm delivery
+    status: planned
+    notes: README roadmap, long-term.

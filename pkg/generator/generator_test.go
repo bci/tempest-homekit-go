@@ -6,6 +6,7 @@ import (
 	"time"
 )
 
+// TestNewWeatherGeneratorWithParamsAndGenerateObservation checks that a generator built with explicit parameters keeps them and produces observations within sane ranges.
 func TestNewWeatherGeneratorWithParamsAndGenerateObservation(t *testing.T) {
 	loc := Location{Name: "TestLand", Latitude: 34.0, Longitude: -118.0, Elevation: 100.0, ClimateZone: "Mediterranean"}
 	wg := NewWeatherGeneratorWithParams(loc, Summer)
@@ -37,6 +38,7 @@ func TestNewWeatherGeneratorWithParamsAndGenerateObservation(t *testing.T) {
 	}
 }
 
+// TestGenerateHistoricalDataAndDailyTotals checks that GenerateHistoricalData returns the requested count and leaves the daily rain total unchanged.
 func TestGenerateHistoricalDataAndDailyTotals(t *testing.T) {
 	loc := Locations[0]
 	wg := NewWeatherGeneratorWithParams(loc, Spring)
@@ -65,6 +67,7 @@ func TestGenerateHistoricalDataAndDailyTotals(t *testing.T) {
 	}
 }
 
+// TestRegenerateAndGenerateNewSeason checks that Regenerate and GenerateNewSeason leave a usable generator that still produces observations.
 func TestRegenerateAndGenerateNewSeason(t *testing.T) {
 	wg := NewWeatherGenerator()
 	oldLoc := wg.GetLocation()
@@ -93,6 +96,7 @@ func TestRegenerateAndGenerateNewSeason(t *testing.T) {
 	}
 }
 
+// TestGenerateObservationConsistentTimestamp checks that a zero CurrentTime still yields a positive (now-based) timestamp.
 func TestGenerateObservationConsistentTimestamp(t *testing.T) {
 	wg := NewWeatherGenerator()
 	// Ensure CurrentTime zero yields now-based timestamp
@@ -107,6 +111,7 @@ func TestGenerateObservationConsistentTimestamp(t *testing.T) {
 }
 
 // Additional tests from earlier file
+
 // TestGeneratePrecipitationType verifies precipitation type selection by temperature and rain
 func TestGeneratePrecipitationType(t *testing.T) {
 	wg := &WeatherGenerator{}

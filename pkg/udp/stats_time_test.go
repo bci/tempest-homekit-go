@@ -7,6 +7,7 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
+// TestIsReceivingDataAndGetStats checks GetStats values and that IsReceivingData is true only for a packet within the last 5 minutes.
 func TestIsReceivingDataAndGetStats(t *testing.T) {
 	l := &UDPListener{observations: make([]weather.Observation, 0, 10)}
 

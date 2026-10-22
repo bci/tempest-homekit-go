@@ -5,6 +5,8 @@ import (
 	"testing"
 )
 
+// TestCalculateSeaLevelPressure_Sanity checks that sea-level pressure equals
+// station pressure at 0 m and is higher at 100 m.
 func TestCalculateSeaLevelPressure_Sanity(t *testing.T) {
 	stationPressure := 1013.25
 	temp := 15.0

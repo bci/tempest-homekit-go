@@ -6,6 +6,7 @@ import (
 	"testing"
 )
 
+// TestGetObservationFromURL_Success checks the mapping of a complete observation JSON object.
 func TestGetObservationFromURL_Success(t *testing.T) {
 	// Build a minimal ObservationResponse JSON matching expected structure
 	jsonBody := `{"obs":[{"timestamp":1620000000,"wind_lull":0,"wind_avg":1.2,"wind_gust":2.3,"wind_direction":180,"station_pressure":1012.5,"air_temperature":20.5,"relative_humidity":50,"brightness":1000,"uv":3,"solar_radiation":0,"precip":0,"precip_accum_local_day":0,"precipitation_type":0,"lightning_strike_avg_distance":0,"lightning_strike_count":0,"battery":3.7,"report_interval":60}]}`
@@ -34,6 +35,7 @@ func TestGetObservationFromURL_Success(t *testing.T) {
 	}
 }
 
+// TestGetObservationFromURL_Non200_Local checks that GetObservationFromURL fails on an HTTP 500.
 func TestGetObservationFromURL_Non200_Local(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)

@@ -1,5 +1,15 @@
 // Package web provides an HTTP server and web dashboard for monitoring Tempest weather data.
 // It serves both API endpoints for weather data and a complete web interface with charts and controls.
+//
+// The central type is WebServer. The main program pushes observations, forecasts and
+// HomeKit/UDP/data-source status into it through its Update*/Set* methods; HTTP handlers
+// read that state under a RWMutex and render it as JSON (/api/weather, /api/status,
+// /api/history, /api/alarm-status, /api/units) or HTML (the dashboard at "/" and the
+// per-chart popout at /chart/<type>). Static assets are served from ./pkg/web/static/
+// relative to the working directory.
+//
+// Files named testhelpers_ui.go and *_test.go in this package hold headless-browser UI
+// test helpers and tests.
 package web
 
 import (
@@ -20,7 +30,20 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
-// AlarmManagerInterface defines the methods we need from the alarm manager
+// AlarmManagerInterface defines the methods we need from the alarm manager.
+//
+// It is the read-only view handleAlarmStatusAPI uses to build /api/alarm-status, kept as
+// an interface so this package does not depend on the concrete alarm manager and tests can
+// supply a fake.
+//
+// Methods:
+//   - GetConfig returns the currently loaded alarm configuration.
+//   - GetAlarmCount returns the total number of configured alarms.
+//   - GetEnabledAlarmCount returns the number of alarms with Enabled set.
+//   - GetConfigPath returns the path the alarm configuration was loaded from.
+//   - GetLastLoadTime returns when the configuration was last (re)loaded; zero if never.
+//   - GetLocation returns the station coordinates used to evaluate sunrise/sunset
+//     schedules.
 type AlarmManagerInterface interface {
 	GetConfig() *alarm.AlarmConfig
 	GetAlarmCount() int
@@ -32,6 +55,22 @@ type AlarmManagerInterface interface {
 
 // WebServer provides HTTP endpoints and a web dashboard for weather monitoring.
 // It manages weather data, serves API endpoints, and provides real-time updates.
+//
+// All mutable state is guarded by mu; exported setters take the write lock and handlers
+// take the read lock. Fields without an inline comment:
+//   - port is the listen port (without colon); server is the underlying http.Server.
+//   - weatherData is the most recent observation; nil until the first UpdateWeather.
+//   - forecastData is the latest forecast passed to UpdateForecast.
+//   - homekitStatus is merged key-by-key by UpdateHomeKitStatus and returned verbatim in
+//     /api/status.
+//   - dataHistory holds observations sorted ascending by Timestamp, trimmed to the newest
+//     maxHistorySize entries by UpdateWeather.
+//   - stationName is the display name set by SetStationName.
+//   - startTime is when the server was constructed, used for the reported uptime.
+//   - historicalDataLoaded and historicalDataCount are set by SetHistoricalDataStatus.
+//   - historyLoadingProgress is the preload progress reported in /api/status, set by
+//     SetHistoryLoadingProgress and cleared by SetHistoryLoadingComplete.
+//   - mu guards every field above.
 type WebServer struct {
 	port                   string
 	server                 *http.Server
@@ -69,14 +108,16 @@ type WebServer struct {
 	mu               sync.RWMutex
 }
 
-// logDebug prints debug messages only if log level is debug
+// logDebug prints debug messages only if log level is debug.
+//
+// The filter uses the server's own logLevel in addition to the global logger's level.
 func (ws *WebServer) logDebug(format string, v ...interface{}) {
 	if ws.logLevel == "debug" {
 		logger.Debug(format, v...)
 	}
 }
 
-// logInfo prints info and debug messages only if log level is debug or info
+// logInfo prints info and debug messages only if log level is debug or info.
 func (ws *WebServer) logInfo(format string, v ...interface{}) {
 	if ws.logLevel == "debug" || ws.logLevel == "info" {
 		logger.Info(format, v...)
@@ -89,12 +130,14 @@ func (ws *WebServer) logError(format string, v ...interface{}) {
 	logger.Error(format, v...)
 }
 
+// _ references logError at package scope so staticcheck/gopls don't report it as unused.
+//
 // Reference logError at package scope so staticcheck/gopls don't report it as unused.
 // The method is intentionally available for future use; keeping a reference here
 // avoids IDE noise while preserving the method for callers.
 var _ = (*WebServer).logError
 
-// Extra no-op closure to ensure static analyzers treat logError as referenced.
+// _ is an extra no-op closure to ensure static analyzers treat logError as referenced.
 var _ = func() interface{} {
 	var ws *WebServer
 	// take method value; safe even with nil receiver
@@ -102,6 +145,20 @@ var _ = func() interface{} {
 	return nil
 }()
 
+// WeatherResponse is the JSON body of /api/weather and the element type of
+// StatusResponse.DataHistory.
+//
+// Numeric fields are passed through from weather.Observation in the units the data source
+// supplies (temperature in Celsius, pressure in mb); conversion to the user's display
+// units happens in the browser. Fields:
+//   - RainAccum is the rain since the previous sample, never negative; RainRate is that
+//     amount scaled to mm/hr; RainDailyTotal is the day's total (from the observation for
+//     /api/weather, computed from history for /api/status entries).
+//   - Pressure is station pressure; SeaLevelPressure, PressureCondition, PressureTrend and
+//     WeatherForecast are derived from it and are only filled for /api/weather.
+//   - LastUpdate is the observation time in RFC 3339.
+//   - UnitHints names the units of the numeric fields; ObservationCount and MaxHistorySize
+//     report history fill. All three are omitted in history entries.
 type WeatherResponse struct {
 	Temperature          float64           `json:"temperature"`
 	Humidity             float64           `json:"humidity"`
@@ -128,6 +185,12 @@ type WeatherResponse struct {
 	MaxHistorySize       int               `json:"maxHistorySize,omitempty"`
 }
 
+// StatusResponse is the JSON body of /api/status.
+//
+// It combines connection state, uptime (formatted "XhYmZs"), the full chart history,
+// history-preload progress, forecast, TempestWX station status, generated-weather, UDP and
+// data-source status. Optional sections are omitted or null when the corresponding source
+// is not configured. Connected is true once any observation has been received.
 type StatusResponse struct {
 	Connected              bool                   `json:"connected"`
 	LastUpdate             string                 `json:"lastUpdate"`
@@ -156,7 +219,10 @@ type StatusResponse struct {
 	ChartHistoryHours int                       `json:"chartHistoryHours"` // Hours of data to display in charts (0=all)
 }
 
-// UDPStatusInfo contains information about UDP stream status
+// UDPStatusInfo contains information about UDP stream status.
+//
+// It is included in /api/status only when a UDP listener has been set; Enabled is then
+// always true. LastPacketTime is RFC 3339 and omitted before the first packet.
 type UDPStatusInfo struct {
 	Enabled        bool   `json:"enabled"`
 	ReceivingData  bool   `json:"receivingData"`
@@ -166,7 +232,10 @@ type UDPStatusInfo struct {
 	LastPacketTime string `json:"lastPacketTime,omitempty"`
 }
 
-// GeneratedWeatherInfo contains information about generated weather data
+// GeneratedWeatherInfo contains information about generated weather data.
+//
+// It describes the synthetic location, season and climate zone currently used by the
+// weather generator; handleRegenerateWeatherAPI updates it in place.
 type GeneratedWeatherInfo struct {
 	Enabled     bool   `json:"enabled"`
 	Location    string `json:"location"`
@@ -174,7 +243,19 @@ type GeneratedWeatherInfo struct {
 	ClimateZone string `json:"climateZone"`
 }
 
-// WeatherGeneratorInterface defines the interface for weather generators
+// WeatherGeneratorInterface defines the interface for weather generators.
+//
+// It is satisfied by the generator package's synthetic weather source and lets tests
+// substitute a fake.
+//
+// Methods:
+//   - GenerateNewSeason picks a new random location and season.
+//   - GetLocation returns the current synthetic location.
+//   - GetSeason returns the current synthetic season.
+//   - GetDailyRainTotal returns the generator's running rain total for the current day.
+//   - SetCurrentWeatherMode switches the generator to producing "now" observations
+//     rather than historical backfill.
+//   - GenerateObservation returns a new synthetic observation.
 type WeatherGeneratorInterface interface {
 	GenerateNewSeason()
 	GetLocation() generator.Location
@@ -184,7 +265,15 @@ type WeatherGeneratorInterface interface {
 	GenerateObservation() *weather.Observation
 }
 
-// Calculate daily rain accumulation from historical data
+// calculateDailyRainAccumulation returns today's rain total.
+//
+// Calculate daily rain accumulation from historical data. When generated weather is
+// active, the generator's daily total is returned instead. Otherwise it takes the
+// observations since local midnight and returns the difference between the latest and
+// earliest RainAccumulated values, treating RainAccumulated as a cumulative counter.
+// With a single observation that value itself is returned if it is at most 10. It
+// returns 0 when there is no data, when the counter went backwards, or when the
+// difference exceeds the sanity limit of 20. It takes the read lock.
 func (ws *WebServer) calculateDailyRainAccumulation() float64 {
 	ws.mu.RLock()
 	defer ws.mu.RUnlock()
@@ -264,7 +353,12 @@ func (ws *WebServer) calculateDailyRainAccumulation() float64 {
 	return 0.0
 }
 
-// calculateDailyRainForTime calculates the daily rain total for a specific time
+// calculateDailyRainForTime calculates the daily rain total for a specific time.
+//
+// It considers observations from startOfDay through targetTime inclusive and returns the
+// RainAccumulated of the last one at or before targetTime minus that of the first,
+// clamped at 0 (a single observation returns its own value, clamped at 0). It does not
+// lock; the caller must hold ws.mu. It scans all of dataHistory on every call.
 func (ws *WebServer) calculateDailyRainForTime(targetTime time.Time, startOfDay time.Time) float64 {
 	// Find observations from the start of the day up to the target time
 	var dayObservations []weather.Observation
@@ -304,7 +398,11 @@ func (ws *WebServer) calculateDailyRainForTime(targetTime time.Time, startOfDay 
 	return math.Max(0, targetReading-earliestReading)
 }
 
-// Pressure analysis functions
+// calculateSeaLevelPressure reduces station pressure to sea level.
+//
+// Pressure analysis functions. stationPressure is in mb (hPa), temperature in Celsius and
+// elevation in meters; the result is in the same unit as stationPressure. It uses the
+// barometric formula with the standard 0.0065 K/m lapse rate and an exponent of 5.257.
 func calculateSeaLevelPressure(stationPressure, temperature, elevation float64) float64 {
 	// Convert temperature from Celsius to Kelvin
 	tempK := temperature + 273.15
@@ -321,6 +419,8 @@ func calculateSeaLevelPressure(stationPressure, temperature, elevation float64) 
 	return seaLevelPressure
 }
 
+// getPressureDescription classifies a sea-level pressure in mb as "Low" (< 980),
+// "High" (> 1020) or "Normal".
 func getPressureDescription(pressure float64) string {
 	if pressure < 980 {
 		return "Low"
@@ -330,6 +430,12 @@ func getPressureDescription(pressure float64) string {
 	return "Normal"
 }
 
+// getPressureTrend returns "Rising", "Falling" or "Stable" for the recent pressure history.
+//
+// It converts the last 60 observations (about an hour at one-minute intervals) to
+// sea-level pressure using elevation and compares the newest with the oldest: a change of
+// more than 1 mb either way is a trend. Fewer than two observations is "Stable".
+// dataHistory must be in ascending time order.
 func getPressureTrend(dataHistory []weather.Observation, elevation float64) string {
 	if len(dataHistory) < 2 {
 		return "Stable"
@@ -357,6 +463,12 @@ func getPressureTrend(dataHistory []weather.Observation, elevation float64) stri
 	return "Stable"
 }
 
+// getPressureWeatherForecast returns a short barometer-style forecast from a sea-level
+// pressure in mb and a trend from getPressureTrend.
+//
+// Rising: "Fair Weather" above 1013, else "Storm Clearing". Falling: "Stormy" below 1000,
+// "Unsettled" below 1013, else "Change Coming". Any other trend is treated as Stable:
+// "Fair Weather" above 1020, "Stormy" below 1000, else "Settled".
 func getPressureWeatherForecast(pressure float64, trend string) string {
 	switch trend {
 	case "Rising":
@@ -384,6 +496,17 @@ func getPressureWeatherForecast(pressure float64, trend string) string {
 	}
 }
 
+// NewWebServer creates a WebServer and registers its routes, without starting it.
+//
+// port is the listen port without a colon; elevation (meters) is used for sea-level
+// pressure; logLevel filters this server's debug/info logging; stationID and
+// useWebStatus configure the TempestWX status manager; version is shown in the UI;
+// stationURL is reported in /api/status. generatedWeather and weatherGenerator are
+// non-nil only when synthetic weather is in use. units and unitsPressure are returned
+// by /api/units. historyPoints is the history capacity: values above 100000 are capped
+// at 100000 and values below 10 are raised to 100. chartHistoryHours limits the hours
+// shown in charts (0 = all). alarmConfig is the configured alarm path or content and
+// disableAlarms reflects the --disable-alarms flag; both feed /api/alarm-status.
 func NewWebServer(port string, elevation float64, logLevel string, stationID int, useWebStatus bool, version string, stationURL string, generatedWeather *GeneratedWeatherInfo, weatherGenerator WeatherGeneratorInterface, units string, unitsPressure string, historyPoints int, chartHistoryHours int, alarmConfig string, disableAlarms bool) *WebServer {
 	// Validate history size to prevent excessive memory allocation
 	if historyPoints > 100000 {
@@ -445,6 +568,10 @@ func NewWebServer(port string, elevation float64, logLevel string, stationID int
 	return ws
 }
 
+// Start starts the status manager's periodic scraping and then serves HTTP, blocking
+// until the listener stops.
+//
+// It returns the ListenAndServe error, which after Stop is http.ErrServerClosed.
 func (ws *WebServer) Start() error {
 	ws.logInfo("Starting web server on port %s", ws.port)
 
@@ -461,6 +588,11 @@ func (ws *WebServer) Start() error {
 	return nil
 }
 
+// UpdateWeather records obs as the current observation and inserts it into the history.
+//
+// The history stays sorted by Timestamp: obs is placed by binary search, replaces any
+// entry with the same Timestamp, and the oldest entries are dropped beyond maxHistorySize.
+// Note that weatherData is always set to obs even if obs is older than the newest entry.
 func (ws *WebServer) UpdateWeather(obs *weather.Observation) {
 	ws.mu.Lock()
 	defer ws.mu.Unlock()
@@ -508,6 +640,8 @@ func (ws *WebServer) UpdateWeather(obs *weather.Observation) {
 	}
 }
 
+// UpdateHomeKitStatus merges status into the HomeKit status map reported by /api/status;
+// existing keys are overwritten and others kept.
 func (ws *WebServer) UpdateHomeKitStatus(status map[string]interface{}) {
 	ws.mu.Lock()
 	defer ws.mu.Unlock()
@@ -517,12 +651,15 @@ func (ws *WebServer) UpdateHomeKitStatus(status map[string]interface{}) {
 	}
 }
 
+// SetStationName sets the station display name reported by /api/status.
 func (ws *WebServer) SetStationName(name string) {
 	ws.mu.Lock()
 	defer ws.mu.Unlock()
 	ws.stationName = name
 }
 
+// SetHistoricalDataStatus marks historical data as loaded and records how many
+// observations were preloaded.
 func (ws *WebServer) SetHistoricalDataStatus(count int) {
 	ws.mu.Lock()
 	defer ws.mu.Unlock()
@@ -530,6 +667,8 @@ func (ws *WebServer) SetHistoricalDataStatus(count int) {
 	ws.historicalDataCount = count
 }
 
+// SetHistoryLoadingProgress marks history preloading as in progress at step currentStep
+// of totalSteps, with a human-readable description shown by the dashboard.
 func (ws *WebServer) SetHistoryLoadingProgress(currentStep, totalSteps int, description string) {
 	ws.mu.Lock()
 	defer ws.mu.Unlock()
@@ -539,6 +678,7 @@ func (ws *WebServer) SetHistoryLoadingProgress(currentStep, totalSteps int, desc
 	ws.historyLoadingProgress.description = description
 }
 
+// SetHistoryLoadingComplete clears the history-loading progress state.
 func (ws *WebServer) SetHistoryLoadingComplete() {
 	ws.mu.Lock()
 	defer ws.mu.Unlock()
@@ -548,14 +688,18 @@ func (ws *WebServer) SetHistoryLoadingComplete() {
 	ws.historyLoadingProgress.description = ""
 }
 
-// SetUDPListener sets the UDP listener for local station monitoring
+// SetUDPListener sets the UDP listener for local station monitoring.
+//
+// Once set, /api/status includes a UDPStatus section built from the listener's stats.
 func (ws *WebServer) SetUDPListener(listener *udp.UDPListener) {
 	ws.mu.Lock()
 	defer ws.mu.Unlock()
 	ws.udpListener = listener
 }
 
-// UpdateDataSourceStatus updates the unified data source status
+// UpdateDataSourceStatus updates the unified data source status.
+//
+// A copy of status is stored and returned as the DataSource section of /api/status.
 func (ws *WebServer) UpdateDataSourceStatus(status weather.DataSourceStatus) {
 	ws.mu.Lock()
 	defer ws.mu.Unlock()
@@ -564,13 +708,17 @@ func (ws *WebServer) UpdateDataSourceStatus(status weather.DataSourceStatus) {
 		status.Type, status.Active, status.ObservationCount)
 }
 
+// UpdateForecast stores the latest forecast, returned as the Forecast section of
+// /api/status.
 func (ws *WebServer) UpdateForecast(forecast *weather.ForecastResponse) {
 	ws.mu.Lock()
 	defer ws.mu.Unlock()
 	ws.forecastData = forecast
 }
 
-// SetAlarmManager sets the alarm manager for status display
+// SetAlarmManager sets the alarm manager for status display.
+//
+// Until it is set, /api/alarm-status reports only whether alarms are configured.
 func (ws *WebServer) SetAlarmManager(manager AlarmManagerInterface) {
 	ws.mu.Lock()
 	defer ws.mu.Unlock()
@@ -578,20 +726,28 @@ func (ws *WebServer) SetAlarmManager(manager AlarmManagerInterface) {
 	logger.Info("Alarm manager connected to web server")
 }
 
-// GetStatusManager returns the status manager for external use
+// GetStatusManager returns the status manager for external use.
 func (ws *WebServer) GetStatusManager() *weather.StatusManager {
 	ws.mu.RLock()
 	defer ws.mu.RUnlock()
 	return ws.statusManager
 }
 
-// UpdateBatteryFromObservation updates the status manager with battery data from the latest observation
+// UpdateBatteryFromObservation updates the status manager with battery data from the latest observation.
+//
+// It is a no-op when there is no status manager.
 func (ws *WebServer) UpdateBatteryFromObservation(obs *weather.Observation) {
 	if ws.statusManager != nil {
 		ws.statusManager.UpdateBatteryFromObservation(obs)
 	}
 }
 
+// handleDashboard serves the dashboard page at "/" and is also the fallback route.
+//
+// It serves ./test-api.html for /test-api.html, and files under /static/ or
+// /pkg/web/static/ from ./pkg/web/static/ (relative to the working directory, so the
+// binary must run from the repository root), with no-cache headers for styles.css and
+// script.js so edits show without a hard reload. Any other path except "/" is a 404.
 func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	ws.logDebug("Request: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
 
@@ -649,6 +805,12 @@ func (ws *WebServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(tmpl))
 }
 
+// handleWeatherAPI serves /api/weather: the current observation as a WeatherResponse.
+//
+// It responds 503 when no observation has been received. Sea-level pressure, pressure
+// condition, trend and forecast are derived here; rain since the last sample and rain
+// rate come from comparing the current observation with the second-newest history entry
+// (the newest being the current observation itself). CORS is open to any origin.
 func (ws *WebServer) handleWeatherAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -754,6 +916,12 @@ func (ws *WebServer) handleWeatherAPI(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(response)
 }
 
+// handleStatusAPI serves /api/status: a StatusResponse with the whole chart history.
+//
+// Each history entry gets incremental rain and rain rate relative to the previous entry
+// and a daily total from calculateDailyRainForTime, all computed while holding the read
+// lock. The TempestWX station status comes from the status manager's cached value.
+// CORS is open to any origin.
 func (ws *WebServer) handleStatusAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -914,7 +1082,11 @@ func (ws *WebServer) handleStatusAPI(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(response)
 }
 
-// AlarmStatusResponse represents the alarm status API response
+// AlarmStatusResponse represents the alarm status API response.
+//
+// Enabled is true when alarms are configured (a config string or a manager is present)
+// and not disabled by flag. ConfigPath and LastReadTime come from the manager when one is
+// set ("N/A"/"Never" otherwise); TotalAlarms and EnabledAlarms are the manager's counts.
 type AlarmStatusResponse struct {
 	Enabled       bool          `json:"enabled"`
 	Disabled      bool          `json:"disabled"` // True if explicitly disabled via --disable-alarms
@@ -925,7 +1097,11 @@ type AlarmStatusResponse struct {
 	Alarms        []AlarmStatus `json:"alarms"`
 }
 
-// AlarmStatus represents individual alarm information
+// AlarmStatus represents individual alarm information.
+//
+// Channels lists the channel types only. LastTriggered is local time
+// "2006-01-02 15:04:05" or "Never". Cooldown is the configured cooldown in seconds.
+// ScheduleActive is always true for alarms without a schedule (or with type "always").
 type AlarmStatus struct {
 	Name              string   `json:"name"`
 	Description       string   `json:"description"`
@@ -942,6 +1118,12 @@ type AlarmStatus struct {
 	ScheduleActive    bool     `json:"scheduleActive"` // True if schedule allows alarm to be active now
 }
 
+// handleAlarmStatusAPI serves /api/alarm-status: an AlarmStatusResponse built from the
+// alarm manager, including per-alarm cooldown and schedule state evaluated at request
+// time.
+//
+// Without a manager it returns only the enabled/disabled flags and the configured path,
+// with an empty alarm list. CORS is open to any origin.
 func (ws *WebServer) handleAlarmStatusAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -1041,6 +1223,9 @@ func (ws *WebServer) handleAlarmStatusAPI(w http.ResponseWriter, r *http.Request
 
 // handleChartPage serves a dedicated chart page for a given weather type.
 // URL format: /chart/<type>?config=<urlencoded-json>
+//
+// The same ./pkg/web/static/chart.html file is served for every type; the page's script
+// reads the type and config from its own URL.
 func (ws *WebServer) handleChartPage(w http.ResponseWriter, r *http.Request) {
 	// Expected path: /chart/<type>
 	ws.logDebug("Chart page requested: %s", r.URL.Path)
@@ -1054,7 +1239,12 @@ func (ws *WebServer) handleChartPage(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
-// handleRegenerateWeatherAPI handles requests to regenerate weather data for testing
+// handleRegenerateWeatherAPI handles requests to regenerate weather data for testing.
+//
+// It accepts POST only (405 otherwise) and responds 400 when no weather generator is
+// configured. It asks the generator for a new random location and season, copies them
+// into the GeneratedWeatherInfo reported by /api/status, and responds with
+// {"success", "location", "season", "climateZone"}.
 func (ws *WebServer) handleRegenerateWeatherAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -1094,7 +1284,8 @@ func (ws *WebServer) handleRegenerateWeatherAPI(w http.ResponseWriter, r *http.R
 	_ = json.NewEncoder(w).Encode(response)
 }
 
-// handleUnitsAPI returns the current units configuration
+// handleUnitsAPI returns the current units configuration as
+// {"units": ..., "unitsPressure": ...}. CORS is open to any origin.
 func (ws *WebServer) handleUnitsAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -1109,7 +1300,12 @@ func (ws *WebServer) handleUnitsAPI(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(response)
 }
 
-// HistoryResponse represents a single historical observation with calculated incremental rain
+// HistoryResponse represents a single historical observation with calculated incremental rain.
+//
+// It is the element type of /api/history and uses the Tempest API's snake_case field
+// names (except rainAccum and rainRate) so the popout charts can treat it like raw API
+// data. RainAccum and RainAccumulated both carry the observation's RainAccumulated value
+// unchanged; RainRate is computed from the change since the previous entry.
 type HistoryResponse struct {
 	Timestamp            int64   `json:"timestamp"`
 	AirTemperature       float64 `json:"air_temperature"`
@@ -1133,7 +1329,10 @@ type HistoryResponse struct {
 }
 
 // handleHistoryAPI returns historical weather observations for popout charts
-// with calculated incremental rain values
+// with calculated incremental rain values.
+//
+// It copies the history under the read lock, sorts it by time and returns it as a JSON
+// array of HistoryResponse, oldest first. CORS is open to any origin.
 func (ws *WebServer) handleHistoryAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -1202,6 +1401,11 @@ func (ws *WebServer) handleHistoryAPI(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(response)
 }
 
+// getDashboardHTML returns the dashboard page's HTML.
+//
+// The page is built per request: Chart.js and its date adapter are loaded from
+// ./pkg/web/static/ when CI or USE_LOCAL_CHARTJS is set (to avoid CDN flakiness in
+// tests) and from unpkg otherwise, and script.js gets a nanosecond cache-busting query.
 func (ws *WebServer) getDashboardHTML() string {
 	return `<!DOCTYPE html>
 <html lang="en">
@@ -1907,7 +2111,13 @@ func (ws *WebServer) getDashboardHTML() string {
 </html>`
 }
 
-// handleGenerateWeatherAPI returns Tempest API-compatible JSON format for generated weather data
+// handleGenerateWeatherAPI returns Tempest API-compatible JSON format for generated weather data.
+//
+// It accepts GET only (405 otherwise) and responds 503 when no weather generator is
+// configured or 500 if it produces no observation. It switches the generator to
+// current-weather mode and returns one fresh observation shaped like the Tempest REST
+// API, so the weather client can be pointed at it (for example with --station-url) as
+// if it were the real station API.
 func (ws *WebServer) handleGenerateWeatherAPI(w http.ResponseWriter, r *http.Request) {
 	ws.logDebug("Generate weather API endpoint called from %s", r.RemoteAddr)
 
@@ -1972,6 +2182,8 @@ func (ws *WebServer) handleGenerateWeatherAPI(w http.ResponseWriter, r *http.Req
 	_ = json.NewEncoder(w).Encode(response)
 }
 
+// Stop closes the HTTP server immediately (without draining in-flight requests),
+// causing Start to return. It does not stop the status manager.
 func (ws *WebServer) Stop() error {
 	if ws.server != nil {
 		return ws.server.Close()

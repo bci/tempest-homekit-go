@@ -1,5 +1,6 @@
-// Package weather provides status management for Tempest weather station data.
+// This file provides status management for Tempest weather station data.
 // The StatusManager handles periodic web scraping when enabled via CLI flag.
+
 package weather
 
 import (
@@ -9,7 +10,15 @@ import (
 	"time"
 )
 
-// StatusManager handles periodic scraping and caching of station status
+// StatusManager handles periodic scraping and caching of station status for the
+// dashboard. It always holds a status: a placeholder ("--" values) until real
+// data arrives from web scraping (every 15 minutes when enabled), from UDP
+// device/hub status messages (UpdateFromUDP) or from observation battery
+// readings (UpdateBatteryFromObservation).
+//
+// Fields: stationID and logLevel parameterise scraping; useWebScraping enables
+// it; cachedStatus is the current status, guarded by mutex; stopChan stops the
+// scraping loop; scrapingActive records whether Start launched it.
 type StatusManager struct {
 	stationID      int
 	logLevel       string
@@ -20,7 +29,9 @@ type StatusManager struct {
 	scrapingActive bool
 }
 
-// NewStatusManager creates a new status manager
+// NewStatusManager creates a new status manager for stationID, initialised with
+// the fallback status. useWebScraping enables scraping of the TempestWX status
+// page once Start is called; logLevel "debug" enables diagnostics.
 func NewStatusManager(stationID int, logLevel string, useWebScraping bool) *StatusManager {
 	manager := &StatusManager{
 		stationID:      stationID,
@@ -35,7 +46,9 @@ func NewStatusManager(stationID int, logLevel string, useWebScraping bool) *Stat
 	return manager
 }
 
-// Start begins the periodic status scraping if web scraping is enabled
+// Start begins the periodic status scraping if web scraping is enabled: one
+// scrape immediately and then one every 15 minutes, each in its own goroutine.
+// It does nothing when scraping is disabled.
 func (sm *StatusManager) Start() {
 	if !sm.useWebScraping {
 		if sm.logLevel == "debug" {
@@ -57,7 +70,8 @@ func (sm *StatusManager) Start() {
 	go sm.periodicScraping()
 }
 
-// Stop stops the periodic scraping
+// Stop stops the periodic scraping. It blocks until the scraping loop receives
+// the stop signal and does nothing if scraping was never started.
 func (sm *StatusManager) Stop() {
 	if sm.scrapingActive {
 		sm.stopChan <- true
@@ -68,7 +82,7 @@ func (sm *StatusManager) Stop() {
 	}
 }
 
-// GetStatus returns the current cached status
+// GetStatus returns the current cached status as a copy that the caller may modify.
 func (sm *StatusManager) GetStatus() *StationStatus {
 	sm.mutex.RLock()
 	defer sm.mutex.RUnlock()
@@ -78,7 +92,7 @@ func (sm *StatusManager) GetStatus() *StationStatus {
 	return &statusCopy
 }
 
-// periodicScraping runs the scraping loop every 15 minutes
+// periodicScraping runs the scraping loop every 15 minutes until a value is received on stopChan.
 func (sm *StatusManager) periodicScraping() {
 	ticker := time.NewTicker(15 * time.Minute)
 	defer ticker.Stop()
@@ -93,7 +107,10 @@ func (sm *StatusManager) periodicScraping() {
 	}
 }
 
-// performScrape attempts to scrape status data
+// performScrape attempts to scrape status data, first with the headless browser
+// and then, if that fails, with a plain HTTP fetch. A result counts only if
+// hasUsefulData accepts it, in which case it is tagged with DataSource
+// "api, web status page"; otherwise the fallback status is cached instead.
 func (sm *StatusManager) performScrape() {
 	if sm.logLevel == "debug" {
 		logger.Debug("Performing status scrape for station %d", sm.stationID)
@@ -158,7 +175,9 @@ func (sm *StatusManager) performScrape() {
 	}
 }
 
-// hasUsefulData checks if the status contains any useful scraped data
+// hasUsefulData checks if the status contains any useful scraped data: any of
+// battery voltage, device or hub uptime, network status or serial number set
+// to something other than "" or the "--" placeholder.
 func (sm *StatusManager) hasUsefulData(status *StationStatus) bool {
 	if status == nil {
 		return false
@@ -183,8 +202,11 @@ func (sm *StatusManager) hasUsefulData(status *StationStatus) bool {
 	return hasData
 }
 
-// createFallbackStatus creates a status with fallback values and appropriate metadata
-// If latestObs is provided, it will use the battery voltage from the observation
+// createFallbackStatus creates a status with fallback values and appropriate
+// metadata: every display field is "--", DataSource is "api", LastScraped is
+// now and ScrapingEnabled mirrors the configuration. (An earlier note said it
+// could use the battery voltage from a latestObs argument; it takes no
+// argument - UpdateBatteryFromObservation does that separately.)
 func (sm *StatusManager) createFallbackStatus() *StationStatus {
 	dataSource := "api"
 	if sm.useWebScraping {
@@ -215,7 +237,10 @@ func (sm *StatusManager) createFallbackStatus() *StationStatus {
 	return status
 }
 
-// UpdateBatteryFromObservation updates the cached status with battery data from the latest observation
+// UpdateBatteryFromObservation updates the cached status with battery data from the latest observation.
+// It only applies while the status comes from the API fallback (DataSource
+// "api" or "fallback") and obs has a positive battery voltage; the status is
+// then reported as "Good".
 func (sm *StatusManager) UpdateBatteryFromObservation(obs *Observation) {
 	sm.mutex.Lock()
 	defer sm.mutex.Unlock()
@@ -236,7 +261,13 @@ func (sm *StatusManager) UpdateBatteryFromObservation(obs *Observation) {
 	}
 }
 
-// UDPDeviceStatus represents device status from UDP broadcasts
+// UDPDeviceStatus represents device status from UDP broadcasts (a device_status
+// message), in the form StatusManager consumes.
+//
+// Fields: Timestamp is Unix seconds; Uptime is in seconds; Voltage is the
+// battery voltage; RSSI and HubRSSI are signal strengths in dBm; SensorStatus is
+// the sensor-failure bit field (0 means all OK); SerialNumber is the device
+// serial.
 type UDPDeviceStatus struct {
 	Timestamp    int64
 	Uptime       int
@@ -247,7 +278,13 @@ type UDPDeviceStatus struct {
 	SerialNumber string
 }
 
-// UDPHubStatus represents hub status from UDP broadcasts
+// UDPHubStatus represents hub status from UDP broadcasts (a hub_status message),
+// in the form StatusManager consumes.
+//
+// Fields: Timestamp is Unix seconds; FirmwareRev is the firmware revision as
+// decimal text; Uptime is in seconds; RSSI is the hub Wi-Fi signal in dBm;
+// ResetFlags lists the causes of the last reset; SerialNumber is the hub
+// serial.
 type UDPHubStatus struct {
 	Timestamp    int64
 	FirmwareRev  string
@@ -257,7 +294,12 @@ type UDPHubStatus struct {
 	SerialNumber string
 }
 
-// UpdateFromUDP updates the cached status with data from UDP broadcasts
+// UpdateFromUDP updates the cached status with data from UDP broadcasts.
+// Either argument may be nil. Battery voltage is rated Good (>= 2.5 V), Fair
+// (>= 2.3 V) or Low; RSSI is rated Excellent (>= -60), Good (>= -70), Fair
+// (>= -80) or Poor; uptimes are formatted as "Nd Nh Nm Ns". The update only
+// applies while the status comes from the API fallback (DataSource "api" or
+// "fallback"), and it then sets DataSource to "udp".
 func (sm *StatusManager) UpdateFromUDP(deviceStatus *UDPDeviceStatus, hubStatus *UDPHubStatus) {
 	sm.mutex.Lock()
 	defer sm.mutex.Unlock()

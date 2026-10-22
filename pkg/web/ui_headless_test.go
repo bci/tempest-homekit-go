@@ -413,6 +413,10 @@ func TestHeadlessDashboard(t *testing.T) {
 	}
 }
 
+// containsErrorKeyword reports whether s contains a JavaScript exception name
+// (TypeError, ReferenceError, SyntaxError, RangeError, EvalError, URIError) or
+// "Uncaught". Matching is case-sensitive. It is currently referenced only by
+// the no-op assignment below.
 func containsErrorKeyword(s string) bool {
 	// simple checks for JS error indicators
 	if s == "" {
@@ -430,7 +434,8 @@ func containsErrorKeyword(s string) bool {
 	return false
 }
 
-// contains is a tiny case-sensitive substring helper
+// contains is a tiny case-sensitive substring helper (equivalent to
+// strings.Contains); an empty sub always matches.
 func contains(s, sub string) bool {
 	return len(sub) == 0 || (len(s) >= len(sub) && (indexOf(s, sub) >= 0))
 }
@@ -445,7 +450,8 @@ func indexOf(s, substr string) int {
 	return -1
 }
 
-// min returns the smaller of two ints
+// min returns the smaller of two ints. It shadows the Go 1.21 builtin min
+// within this package's tests.
 func min(a, b int) int {
 	if a < b {
 		return a
@@ -454,6 +460,8 @@ func min(a, b int) int {
 }
 
 // firstN returns the first n characters of s for diagnostic output.
+//
+// n counts bytes, not runes, so a multi-byte character at the cut may be split.
 func firstN(s string, n int) string {
 	if len(s) <= n {
 		return s
@@ -464,6 +472,8 @@ func firstN(s string, n int) string {
 // package-level no-op references to satisfy staticcheck/unused warnings for helper
 // functions that are useful for future tests/diagnostics but currently only used
 // dynamically from other test helpers.
+//
+// _ (both lines) keeps containsErrorKeyword and min referenced.
 var _ = containsErrorKeyword
 var _ = min
 

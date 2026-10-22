@@ -6,6 +6,7 @@ import (
 	"time"
 )
 
+// TestFlexInt_UnmarshalInt_Udp checks that FlexInt decodes a JSON number.
 func TestFlexInt_UnmarshalInt_Udp(t *testing.T) {
 	var fi FlexInt
 	data := []byte("35")
@@ -17,6 +18,7 @@ func TestFlexInt_UnmarshalInt_Udp(t *testing.T) {
 	}
 }
 
+// TestFlexInt_UnmarshalString_Udp checks that FlexInt decodes a numeric JSON string.
 func TestFlexInt_UnmarshalString_Udp(t *testing.T) {
 	var fi FlexInt
 	data := []byte("\"42\"")
@@ -28,6 +30,7 @@ func TestFlexInt_UnmarshalString_Udp(t *testing.T) {
 	}
 }
 
+// TestPrettyPrintMessage_ObsST checks that a complete obs_st message pretty-prints to a non-empty line.
 func TestPrettyPrintMessage_ObsST(t *testing.T) {
 	// Construct minimal obs_st payload with expected indices
 	payload := UDPMessage{

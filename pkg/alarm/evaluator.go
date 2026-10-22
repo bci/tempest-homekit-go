@@ -9,21 +9,48 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
-// Evaluator evaluates alarm conditions against weather observations
+// Evaluator evaluates alarm conditions against weather observations. It is
+// stateless; per-alarm state for change detection lives on [Alarm], so one
+// Evaluator can be shared by all alarms.
 type Evaluator struct{}
 
-// NewEvaluator creates a new alarm evaluator
+// NewEvaluator creates a new alarm evaluator.
 func NewEvaluator() *Evaluator {
 	return &Evaluator{}
 }
 
-// Evaluate checks if an alarm condition is met given weather data
-// alarm parameter is optional and only needed for change-detection operators
+// Evaluate checks if an alarm condition is met given weather data.
+// It passes no alarm, so change-detection operators (*field, >field, <field)
+// return an error; use [Evaluator.EvaluateWithAlarm] for those.
 func (e *Evaluator) Evaluate(condition string, obs *weather.Observation) (bool, error) {
 	return e.EvaluateWithAlarm(condition, obs, nil)
 }
 
-// EvaluateWithAlarm checks if an alarm condition is met given weather data and alarm state
+// EvaluateWithAlarm checks if an alarm condition is met given weather data and alarm state.
+//
+// Supported syntax:
+//   - Comparisons "field op value" with op one of >, <, >=, <=, ==, !=. The
+//     value may carry a unit suffix (80F, 25mph, 80%); see parseValueWithUnits.
+//   - Change detection "*field" (any change), ">field" (increase) and
+//     "<field" (decrease) relative to the alarm's previous value; these need
+//     a non-nil alarm.
+//   - Compound conditions joined with && or ||. If the condition contains
+//     "&&" it is split on "&&" only, otherwise on "||"; there is no
+//     precedence, grouping or mixing of the two.
+//
+// Examples:
+//
+//	"temperature > 85"
+//	"humidity > 80 && temperature > 35"
+//	"lux > 10000 && lux < 50000"
+//	"*lightning_count"     (triggers on any change)
+//	">rain_rate"           (triggers when rain increases)
+//	"<lightning_distance"  (triggers when lightning gets closer)
+//
+// It returns false and an error for an empty operand around && or ||, an
+// unknown field, an unparsable value, or a change-detection operator without
+// an alarm. Change-detection terms update alarm's previous values as a side
+// effect. obs must be non-nil.
 func (e *Evaluator) EvaluateWithAlarm(condition string, obs *weather.Observation, alarm *Alarm) (bool, error) {
 	// Parse and evaluate the condition
 	// Supports: >, <, >=, <=, ==, !=, &&, ||, *field, >field, <field
@@ -89,7 +116,14 @@ func (e *Evaluator) EvaluateWithAlarm(condition string, obs *weather.Observation
 	return e.evaluateSimpleWithAlarm(condition, obs, alarm)
 }
 
-// evaluateSimpleWithAlarm evaluates a simple comparison with optional alarm state
+// evaluateSimpleWithAlarm evaluates a simple comparison with optional alarm state.
+//
+// A condition whose first character is *, > or < is routed to
+// evaluateChangeDetection (and fails if alarm is nil). Otherwise the first
+// operator found, trying >=, <=, !=, ==, >, < in that order, splits the
+// condition into field and value. It returns an error when no operator is
+// found after a non-empty field, the field is unknown, or the value does not
+// parse.
 func (e *Evaluator) evaluateSimpleWithAlarm(condition string, obs *weather.Observation, alarm *Alarm) (bool, error) {
 	// Check for unary change-detection operators first
 	if len(condition) > 0 {
@@ -136,7 +170,12 @@ func (e *Evaluator) evaluateSimpleWithAlarm(condition string, obs *weather.Obser
 	return e.compare(fieldValue, operator, compareValue), nil
 }
 
-// getFieldValue extracts a field value from the weather observation
+// getFieldValue extracts a field value from the weather observation.
+//
+// The field name is lower-cased and spaces become underscores, and several
+// aliases are accepted (temp, wind, light, uv_index, rain_accumulated,
+// rain_accumulation). Note rain_daily currently reads RainAccumulated, not
+// RainDailyTotal. It returns an error for an unknown field.
 func (e *Evaluator) getFieldValue(field string, obs *weather.Observation) (float64, error) {
 	field = strings.ToLower(strings.ReplaceAll(field, " ", "_"))
 
@@ -177,6 +216,10 @@ func (e *Evaluator) getFieldValue(field string, obs *weather.Observation) (float
 //   - Temperature: 80F or 80f -> Celsius, 32C or 32c -> Celsius (no conversion)
 //   - Wind: 25mph -> m/s, 10m/s or 10 -> m/s (no conversion)
 //   - Humidity: 80% -> 80 (no conversion, just strip %)
+//
+// Unit suffixes are only recognised for the fields named above (wind units
+// apply to wind_speed, wind and wind_gust); for any other field the value must
+// be a plain number. The error is the strconv.ParseFloat error.
 func (e *Evaluator) parseValueWithUnits(valueStr string, field string) (float64, error) {
 	valueStr = strings.TrimSpace(valueStr)
 	field = strings.ToLower(field)
@@ -237,6 +280,12 @@ func (e *Evaluator) parseValueWithUnits(valueStr string, field string) (float64,
 //	*field - triggers on ANY change in field value
 //	>field - triggers when field value increases from previous
 //	<field - triggers when field value decreases from previous
+//
+// The first evaluation for a field only records a baseline and returns false.
+// On a trigger, the previous value is saved with [Alarm.SetTriggerContext] so
+// notifications can show what was compared. The current value is then stored
+// as the new previous value. Errors are returned for a condition shorter than
+// two characters or an unknown field.
 func (e *Evaluator) evaluateChangeDetection(condition string, obs *weather.Observation, alarm *Alarm) (bool, error) {
 	if len(condition) < 2 {
 		return false, fmt.Errorf("invalid change-detection condition: %s", condition)
@@ -304,7 +353,8 @@ func (e *Evaluator) evaluateChangeDetection(condition string, obs *weather.Obser
 	return triggered, nil
 }
 
-// compare performs the actual comparison
+// compare performs the actual comparison a operator b and returns its
+// result; an unrecognised operator yields false.
 func (e *Evaluator) compare(a float64, operator string, b float64) bool {
 	var result bool
 	switch operator {
@@ -328,7 +378,9 @@ func (e *Evaluator) compare(a float64, operator string, b float64) bool {
 	return result
 }
 
-// GetAvailableFields returns a list of supported field names for conditions
+// GetAvailableFields returns a list of supported field names for conditions,
+// including aliases. It omits the rain_accumulated and rain_accumulation
+// aliases that getFieldValue also accepts.
 func (e *Evaluator) GetAvailableFields() []string {
 	return []string{
 		"temperature", "temp",
@@ -347,7 +399,10 @@ func (e *Evaluator) GetAvailableFields() []string {
 	}
 }
 
-// Paraphrase converts a condition into human-readable text
+// Paraphrase converts a condition into human-readable text, for example
+// "temperature > 85F" becomes "When temperature exceeds 85°F". It splits on &&
+// or || the same way [Evaluator.EvaluateWithAlarm] does, never fails, and
+// returns "No condition specified" for an empty condition.
 func (e *Evaluator) Paraphrase(condition string) string {
 	condition = strings.TrimSpace(condition)
 	if condition == "" {
@@ -376,7 +431,10 @@ func (e *Evaluator) Paraphrase(condition string) string {
 	return "When " + e.paraphraseSimple(condition)
 }
 
-// paraphraseSimple converts a simple condition into human-readable text
+// paraphraseSimple converts a simple condition into human-readable text.
+// Change-detection forms become "<field> changes (any value)", "increases" or
+// "decreases"; comparisons use phrases such as "exceeds" and "is at least".
+// Anything it cannot recognise is returned unchanged.
 func (e *Evaluator) paraphraseSimple(condition string) string {
 	// Handle change detection operators
 	if len(condition) > 0 {
@@ -419,7 +477,8 @@ func (e *Evaluator) paraphraseSimple(condition string) string {
 	return condition
 }
 
-// formatFieldName converts a field name into human-readable text
+// formatFieldName converts a field name into human-readable text (for example
+// wind_speed becomes "wind speed"); unknown names are returned lower-cased.
 func (e *Evaluator) formatFieldName(field string) string {
 	field = strings.ToLower(strings.TrimSpace(field))
 	fieldNames := map[string]string{
@@ -447,7 +506,9 @@ func (e *Evaluator) formatFieldName(field string) string {
 	return field
 }
 
-// formatValue formats a value with its unit if applicable
+// formatValue formats a value with its unit if applicable: an F or C suffix
+// (either case) becomes °F or °C, and mph or m/s gain a separating space.
+// Other values, including percentages, are returned trimmed but unchanged.
 func (e *Evaluator) formatValue(value string) string {
 	value = strings.TrimSpace(value)
 	// Check for temperature units

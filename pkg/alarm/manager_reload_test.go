@@ -8,6 +8,8 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
+// TestManager_ReloadConfig checks that reloadConfig picks up a rewritten config file,
+// updating both the alarm count and the enabled-alarm count.
 func TestManager_ReloadConfig(t *testing.T) {
 	// Create a temporary config file
 	tmpDir := t.TempDir()
@@ -98,6 +100,8 @@ func TestManager_ReloadConfig(t *testing.T) {
 	}
 }
 
+// TestManager_ReloadConfig_InvalidJSON checks that reloadConfig returns an error for a
+// file that is no longer valid JSON and keeps the previously loaded alarms.
 func TestManager_ReloadConfig_InvalidJSON(t *testing.T) {
 	// Create a temporary config file
 	tmpDir := t.TempDir()
@@ -149,6 +153,9 @@ func TestManager_ReloadConfig_InvalidJSON(t *testing.T) {
 	}
 }
 
+// TestManager_ReloadConfig_InvalidConfig checks that reloadConfig returns an error when
+// the new file fails validation (an alarm without a name) and keeps the previously
+// loaded alarms.
 func TestManager_ReloadConfig_InvalidConfig(t *testing.T) {
 	// Create a temporary config file
 	tmpDir := t.TempDir()
@@ -216,6 +223,8 @@ func TestManager_ReloadConfig_InvalidConfig(t *testing.T) {
 	}
 }
 
+// TestEvaluateSimple exercises evaluateSimple through Evaluate with simple, AND and OR
+// conditions that evaluate both true and false.
 func TestEvaluateSimple(t *testing.T) {
 	// Test the evaluateSimple function through Evaluate (which calls it)
 	e := NewEvaluator()

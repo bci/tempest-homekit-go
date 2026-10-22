@@ -9,6 +9,8 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
+// TestNewWebServer checks that NewWebServer stores the port, elevation and log
+// level it was given.
 func TestNewWebServer(t *testing.T) {
 	server := testNewWebServer(t)
 
@@ -25,6 +27,8 @@ func TestNewWebServer(t *testing.T) {
 
 // Pressure helper tests are consolidated in helpers_test.go to avoid duplication.
 
+// TestWebServerWeatherEndpoint checks that /api/weather returns 200 with a
+// JSON content type once an observation exists.
 func TestWebServerWeatherEndpoint(t *testing.T) {
 	server := testNewWebServer(t)
 
@@ -62,6 +66,8 @@ func TestWebServerWeatherEndpoint(t *testing.T) {
 	}
 }
 
+// TestWebServerStatusEndpoint checks that /api/status returns 200 with a JSON
+// content type even before any observation.
 func TestWebServerStatusEndpoint(t *testing.T) {
 	server := testNewWebServer(t)
 
@@ -85,6 +91,8 @@ func TestWebServerStatusEndpoint(t *testing.T) {
 	}
 }
 
+// TestUpdateForecast checks that UpdateWeather stores the current observation;
+// despite its name it does not exercise UpdateForecast.
 func TestUpdateForecast(t *testing.T) {
 	server := testNewWebServer(t)
 
@@ -104,6 +112,8 @@ func TestUpdateForecast(t *testing.T) {
 	}
 }
 
+// TestSetHistoryLoadingProgress checks that SetHistoryLoadingProgress marks
+// loading in progress and records the step counts.
 func TestSetHistoryLoadingProgress(t *testing.T) {
 	server := testNewWebServer(t)
 
@@ -120,6 +130,8 @@ func TestSetHistoryLoadingProgress(t *testing.T) {
 	}
 }
 
+// TestSetHistoryLoadingComplete checks that SetHistoryLoadingComplete clears
+// the in-progress flag.
 func TestSetHistoryLoadingComplete(t *testing.T) {
 	server := testNewWebServer(t)
 

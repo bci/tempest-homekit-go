@@ -9,7 +9,13 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
-// TestSyslogConfiguration tests syslog notification by sending a test message
+// TestSyslogConfiguration tests syslog notification by sending a test message.
+//
+// alarmsJSON is the alarm config input accepted by [LoadAlarmConfig];
+// stationName fills {{station}}. It prints the SYSLOG_* settings in effect
+// (or the defaults), sends one message through the real syslog notifier, and
+// prints where to look for it. It returns an error if the config fails to
+// load or the send fails.
 func TestSyslogConfiguration(alarmsJSON, stationName string) error {
 	fmt.Println("Testing syslog notification...")
 	fmt.Println()
@@ -96,7 +102,8 @@ func TestSyslogConfiguration(alarmsJSON, stationName string) error {
 	return nil
 }
 
-// RunSyslogTest is a convenience function that wraps TestSyslogConfiguration and exits
+// RunSyslogTest is a convenience function that wraps TestSyslogConfiguration and exits.
+// It never returns: it calls os.Exit(0) on success and log.Fatalf on failure.
 func RunSyslogTest(alarmsJSON, stationName string) {
 	if err := TestSyslogConfiguration(alarmsJSON, stationName); err != nil {
 		log.Fatalf("Syslog test failed: %v", err)

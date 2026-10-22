@@ -1,5 +1,11 @@
 // Package config provides configuration management for the Tempest HomeKit service.
 // It handles command-line flags, environment variables, and HomeKit database operations.
+//
+// LoadConfig is the entry point: it seeds a Config from environment variables
+// (which the caller is expected to have loaded from the .env file first),
+// lets command-line flags override them, validates the result, and resolves
+// the station elevation. Invalid configuration terminates the process with
+// exit status 2 after printing the usage text.
 package config
 
 import (
@@ -18,20 +24,25 @@ import (
 )
 
 // Config holds all configuration parameters for the Tempest HomeKit service.
+//
+// Defaults and environment variable names are applied by LoadConfig; flag
+// values override environment values. Ports are kept as strings because
+// they are passed straight into listen addresses; validateConfig checks that
+// they are numeric.
 type Config struct {
-	Token                  string
-	StationName            string
-	Pin                    string
-	LogLevel               string
-	LogFilter              string // Filter log messages to only show those containing this string
-	WebPort                string
-	ClearDB                bool
-	DisableHomeKit         bool // Disable HomeKit services and run web console only
-	DisableWebConsole      bool // Disable web server (HomeKit only mode)
-	DisableAlarms          bool // Disable alarm initialization and processing
-	Sensors                string
-	HistoryRead            bool
-	TestAPI                bool
+	Token                  string  // WeatherFlow API token (--token, TEMPEST_TOKEN)
+	StationName            string  // Tempest station name (--station, TEMPEST_STATION_NAME)
+	Pin                    string  // 8-digit HomeKit pairing PIN (--pin, HOMEKIT_PIN; default 00102003)
+	LogLevel               string  // Log level: debug, info, warn/warning or error (--loglevel, LOG_LEVEL)
+	LogFilter              string  // Filter log messages to only show those containing this string
+	WebPort                string  // Web dashboard port, numeric string (--web-port, WEB_PORT; default 8080)
+	ClearDB                bool    // Clear the HomeKit database and reset pairing (--cleardb)
+	DisableHomeKit         bool    // Disable HomeKit services and run web console only
+	DisableWebConsole      bool    // Disable web server (HomeKit only mode)
+	DisableAlarms          bool    // Disable alarm initialization and processing
+	Sensors                string  // Sensors to enable: "all", "min" or a comma list (see ParseSensorConfig)
+	HistoryRead            bool    // Preload history from the Tempest API at startup (--history-read, READ_HISTORY)
+	TestAPI                bool    // Test WeatherFlow API endpoints and data points (--test-api)
 	TestAPILocal           bool    // Test local web API endpoints and exit
 	TestHistory            bool    // Fetch as much historical data as possible and exit
 	TestEmail              string  // Send test email to this address and exit
@@ -95,7 +106,11 @@ type Config struct {
 	StatusThemeList bool   // List available themes and exit
 }
 
-// customUsage prints a well-formatted help message with grouped flags and examples
+// customUsage prints a well-formatted help message with grouped flags and examples.
+//
+// It is installed as flag.Usage by LoadConfig and writes to os.Stderr,
+// using a tabwriter to align flag, description and environment variable
+// columns. Write errors are logged rather than returned.
 func customUsage() {
 	// helper to print and handle any write errors (satisfies errcheck)
 	safeFprintln := func(w io.Writer, a ...interface{}) {
@@ -215,6 +230,17 @@ func customUsage() {
 
 // LoadConfig initializes and returns a new Config struct with values from
 // environment variables, command-line flags, and sensible defaults.
+//
+// It registers all flags on the global flag.CommandLine set and calls
+// flag.Parse, so it must be called at most once per process. If validation
+// fails it prints the error and usage to stderr and calls os.Exit(2).
+//
+// After validation it records whether --webhook-listener and
+// --webhook-listener-port were given explicitly, and resolves elevation:
+// when --elevation is omitted or "auto" (and generated weather is not in
+// use) it looks the elevation up from the station's coordinates over the
+// network; otherwise it parses the given value. Any failure falls back to
+// 275.2 m (903 ft) with a logged warning.
 func LoadConfig() *Config {
 	cfg := &Config{
 		Token:                  getEnvOrDefault("TEMPEST_TOKEN", ""),
@@ -371,7 +397,16 @@ func LoadConfig() *Config {
 	return cfg
 }
 
-// validateConfig validates command line arguments and returns an error if invalid
+// validateConfig validates command line arguments and returns an error if invalid.
+//
+// It first fills defaults into zero-valued fields (Units, UnitsPressure,
+// HistoryPoints, ChartHistoryHours) so that programmatically built Configs
+// validate, which means it mutates cfg. It then checks the log level,
+// sensor list, numeric ports, 8-digit PIN, the token and station name
+// required in WeatherFlow API mode, offline-mode conflicts, mutually
+// exclusive disable flags, that test-sensor flags have generated weather,
+// units, and history limits. It returns the first problem found, phrased
+// for display to the user, or nil.
 func validateConfig(cfg *Config) error {
 	// Ensure sensible defaults for fields when Config structs are created programmatically
 	// Some tests construct Config with empty values and expect sensible defaults to be applied.
@@ -546,7 +581,12 @@ func validateConfig(cfg *Config) error {
 	return nil
 }
 
-// ClearDatabase removes all files in the HomeKit database directory
+// ClearDatabase removes all files in the HomeKit database directory.
+//
+// dbPath is the directory holding HomeKit pairing state. A missing directory
+// is not an error. Entries that cannot be removed (for example non-empty
+// subdirectories) are logged as warnings and skipped. It returns an error
+// only if the directory listing glob fails.
 func ClearDatabase(dbPath string) error {
 	log.Printf("INFO: Clearing HomeKit database at: %s", dbPath)
 
@@ -574,21 +614,28 @@ func ClearDatabase(dbPath string) error {
 	return nil
 }
 
-// SensorConfig represents which sensors should be enabled
+// SensorConfig represents which sensors should be enabled.
+//
+// Each field is true when the matching HomeKit sensor should be exposed.
 type SensorConfig struct {
-	Temperature bool
-	Humidity    bool
-	Light       bool
-	Wind        bool
-	Rain        bool
-	Pressure    bool
-	UV          bool
-	Lightning   bool
+	Temperature bool // Air temperature sensor
+	Humidity    bool // Relative humidity sensor
+	Light       bool // Ambient light (lux) sensor
+	Wind        bool // Wind speed sensor
+	Rain        bool // Rain sensor
+	Pressure    bool // Barometric pressure sensor
+	UV          bool // UV index sensor
+	Lightning   bool // Lightning sensor
 }
 
 // ParseSensorConfig parses the sensor configuration string and returns a SensorConfig
 // with appropriate sensor types enabled based on the input string.
 // Supported values: "all", "min", or comma-separated sensor names.
+//
+// Matching is case-insensitive and ignores surrounding spaces. "min" enables
+// temperature, humidity and light. Accepted names and aliases are temp or
+// temperature, humidity, light or lux, wind, rain, pressure, uv or uvi, and
+// lightning. Unknown names are ignored here; validateConfig rejects them.
 func ParseSensorConfig(sensorsFlag string) SensorConfig {
 	switch strings.ToLower(sensorsFlag) {
 	case "all":
@@ -638,24 +685,31 @@ func ParseSensorConfig(sensorsFlag string) SensorConfig {
 	}
 }
 
-// StationLocation represents station coordinates from WeatherFlow API
+// StationLocation represents station coordinates from WeatherFlow API.
+// It is not currently used by this package.
 type StationLocation struct {
-	StationID int     `json:"station_id"`
-	Name      string  `json:"name"`
-	Latitude  float64 `json:"latitude"`
-	Longitude float64 `json:"longitude"`
-	Timezone  string  `json:"timezone"`
+	StationID int     `json:"station_id"`          // WeatherFlow station ID
+	Name      string  `json:"name"`                // Station name
+	Latitude  float64 `json:"latitude"`            // Latitude in decimal degrees
+	Longitude float64 `json:"longitude"`           // Longitude in decimal degrees
+	Timezone  string  `json:"timezone"`            // IANA time zone name
 	Elevation float64 `json:"elevation,omitempty"` // May be provided directly
 }
 
 // ElevationResponse represents response from elevation API
+// (api.open-elevation.com lookup endpoint).
 type ElevationResponse struct {
+	// Results holds one entry per requested location; Elevation is in metres.
 	Results []struct {
 		Elevation float64 `json:"elevation"`
 	} `json:"results"`
 }
 
-// lookupStationElevation attempts to get elevation from station coordinates
+// lookupStationElevation attempts to get elevation from station coordinates.
+//
+// It resolves coordinates for stationName with getStationCoordinates, then
+// queries the Open Elevation API. It returns the elevation in metres, or an
+// error describing which step failed.
 func lookupStationElevation(token, stationName string) (float64, error) {
 	// First try to get station coordinates from WeatherFlow API
 	lat, lon, err := getStationCoordinates(token, stationName)
@@ -672,7 +726,12 @@ func lookupStationElevation(token, stationName string) (float64, error) {
 	return elevation, nil
 }
 
-// getStationCoordinates fetches station coordinates from WeatherFlow API
+// getStationCoordinates fetches station coordinates from WeatherFlow API.
+//
+// Because fetchWeatherFlowStationCoords is not implemented yet, in practice
+// it falls back to a small table of known city names matched exactly
+// against stationName. It returns latitude and longitude in decimal degrees,
+// or an error when the station is not in the table.
 func getStationCoordinates(token, stationName string) (lat, lon float64, err error) {
 	// First try to get actual station coordinates from WeatherFlow API
 	if coords, err := fetchWeatherFlowStationCoords(token, stationName); err == nil {
@@ -700,7 +759,11 @@ func getStationCoordinates(token, stationName string) (lat, lon float64, err err
 	return 0, 0, fmt.Errorf("coordinates not available for station '%s' (consider adding coordinates to known locations)", stationName)
 }
 
-// fetchWeatherFlowStationCoords attempts to get coordinates from WeatherFlow API
+// fetchWeatherFlowStationCoords attempts to get coordinates from WeatherFlow API.
+//
+// It is a stub: it ignores its arguments and always returns an error so that
+// callers fall back to known locations. On success it would return
+// [latitude, longitude].
 func fetchWeatherFlowStationCoords(_token, _stationName string) (coords [2]float64, err error) {
 	// Explicitly ignore unused parameters to satisfy linter
 	_ = _token
@@ -736,7 +799,12 @@ func fetchWeatherFlowStationCoords(_token, _stationName string) (coords [2]float
 	return coords, fmt.Errorf("WeatherFlow station coordinates API not implemented")
 }
 
-// getElevationFromCoordinates uses Open Elevation API to get elevation
+// getElevationFromCoordinates uses Open Elevation API to get elevation.
+//
+// lat and lon are decimal degrees. It makes one HTTP request with a 10 second
+// timeout and returns the elevation in metres. It returns an error on
+// network failure, a non-200 status, an unreadable or unparsable body, or an
+// empty result list.
 func getElevationFromCoordinates(lat, lon float64) (float64, error) {
 	// Use Open Elevation API (free, no API key required)
 	url := fmt.Sprintf("https://api.open-elevation.com/api/v1/lookup?locations=%.4f,%.4f", lat, lon)
@@ -769,7 +837,11 @@ func getElevationFromCoordinates(lat, lon float64) (float64, error) {
 	return elevResp.Results[0].Elevation, nil
 }
 
-// parseElevation parses elevation string with units (e.g., "903ft", "275m") and returns meters
+// parseElevation parses elevation string with units (e.g., "903ft", "275m") and returns meters.
+//
+// Input is case-insensitive and trimmed; a bare number is taken as metres.
+// It returns the strconv parse error for malformed numbers, and an error if
+// the result is outside Earth's surface range of about -430 m to 8848 m.
 func parseElevation(elevationStr string) (float64, error) {
 	elevationStr = strings.TrimSpace(strings.ToLower(elevationStr))
 
@@ -815,6 +887,8 @@ func parseElevation(elevationStr string) (float64, error) {
 	return meters, nil
 }
 
+// getEnvOrDefault returns the value of environment variable key, or
+// defaultValue when it is unset or empty.
 func getEnvOrDefault(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
@@ -822,7 +896,10 @@ func getEnvOrDefault(key, defaultValue string) string {
 	return defaultValue
 }
 
-// parseIntEnv parses an integer from environment variable or returns default
+// parseIntEnv parses an integer from environment variable or returns default.
+//
+// defaultValue is returned when key is unset, empty or not a valid integer;
+// invalid values are silently ignored.
 func parseIntEnv(key string, defaultValue int) int {
 	if value := os.Getenv(key); value != "" {
 		if intVal, err := strconv.Atoi(value); err == nil {

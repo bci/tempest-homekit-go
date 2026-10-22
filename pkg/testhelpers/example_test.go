@@ -10,6 +10,9 @@ import (
 	"tempest-homekit-go/pkg/weather"
 )
 
+// TestExample_SeedObservationsWithOptions checks that one observation is
+// produced per chart type per point, and prints them in verbose runs.
+//
 // Example showing how to call SeedObservationsWithOptions in a test. This is
 // not a unit test per-se, but having it as an example helps other test authors
 // discover the options-driven seeder.

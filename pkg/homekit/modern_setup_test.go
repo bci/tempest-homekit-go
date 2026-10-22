@@ -6,6 +6,9 @@ import (
 	"tempest-homekit-go/pkg/config"
 )
 
+// TestNewWeatherSystemModern_Basic checks that a bridge with all standard sensors
+// builds, lists sensors, and accepts updates for known and unknown sensor names
+// without panicking.
 func TestNewWeatherSystemModern_Basic(t *testing.T) {
 	cfg := config.SensorConfig{
 		Temperature: true,

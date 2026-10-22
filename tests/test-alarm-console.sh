@@ -1,4 +1,20 @@
 #!/bin/bash
+#
+# Checks that alarm notifications ("🚨 ALARM:") still reach the console when
+# the app runs with --loglevel warning, and that INFO/DEBUG lines are
+# suppressed. Kills every process matching "tempest-homekit-go" (pkill -f),
+# starts the app on the default web port 8080 with
+# --alarms @tempest-alarms.json, queries /api/alarm-status expecting 4 of 4
+# alarms enabled, waits 65 s for live weather data, then greps the log.
+# Needs network access (WeatherFlow API), curl and python3. Log:
+# /tmp/alarm-test.log. Runs about 75 s.
+#
+# Manual smoke test, not part of `go test` or CI: it prints results for a
+# person to read and exits 0 whether or not the checks pass, except that it
+# exits 1 if the app fails to start. Run it from the repository root after
+# `go build` (it executes ./tempest-homekit-go and reads ./tempest-alarms.json).
+#
+# Usage: ./tests/test-alarm-console.sh
 
 echo "=========================================="
 echo "Testing Alarm Console Output with Warning Log Level"

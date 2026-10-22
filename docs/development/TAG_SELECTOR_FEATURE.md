@@ -453,7 +453,7 @@ Tags are sanitized in the UI to prevent issues:
 
 - [Alarm Editor Enhancements](../../pkg/alarm/docs/ALARM_EDITOR_ENHANCEMENTS.md) - Overall editor improvements
 - [JSON Viewer Feature](./JSON_VIEWER_FEATURE.md) - View alarm configuration
-- [Example Alarms](../../example-alarms.json) - Sample alarm configurations with tags
+- [Example Alarms](../../examples/example-alarms.json) - Sample alarm configurations with tags
 
 ##  Summary
 
