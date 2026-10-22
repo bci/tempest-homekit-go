@@ -8,6 +8,7 @@ This guide covers deploying Tempest HomeKit Go using Docker containers for both 
 - [Quick Start](#quick-start)
 - [Local Docker Desktop Deployment](#local-docker-desktop-deployment)
 - [QNAP NAS Container Station Deployment](#qnap-nas-container-station-deployment)
+- [AWS Container Service Deployment](#aws-container-service-deployment)
 - [Building and Pushing Images](#building-and-pushing-images)
 - [Configuration](#configuration)
 - [Environment Variables](#environment-variables)
@@ -23,6 +24,8 @@ This guide covers deploying Tempest HomeKit Go using Docker containers for both 
 - **Station Name** (your WeatherFlow station name)
 - **Basic Docker knowledge**
 
+**Note:** The official Docker image (`behrconsulting/tempest-homekit-go`) supports multiple architectures (AMD64 and ARM64), making it compatible with both Intel/AMD and ARM-based systems including QNAP NAS devices.
+
 ## Quick Start
 
 ### Test with Generated Weather (No API Token Required)
@@ -32,7 +35,7 @@ This guide covers deploying Tempest HomeKit Go using Docker containers for both 
 docker build -t tempest-homekit-go:latest .
 
 # Run with generated weather
-docker run -d -p 8080:8080 --name tempest-weather \
+docker run -d -p 8080:8080 -p 8081:8081 --name tempest-weather \
   --entrypoint ./tempest-homekit-go \
   tempest-homekit-go:latest \
   --use-generated-weather \
@@ -45,7 +48,7 @@ docker run -d -p 8080:8080 --name tempest-weather \
 
 ```bash
 # Run with WeatherFlow API
-docker run -d -p 8080:8080 --name tempest-weather \
+docker run -d -p 8080:8080 -p 8081:8081 --name tempest-weather \
   -e TEMPEST_TOKEN="your-api-token" \
   -e TEMPEST_STATION_NAME="Your Station Name" \
   --entrypoint ./tempest-homekit-go \
@@ -65,6 +68,7 @@ docker run -d \
   --name tempest-homekit-go \
   -p 8080:8080 \
   -p 51826:51826 \
+  -p 8081:8081 \
   -e TEMPEST_TOKEN="your-api-token" \
   -e TEMPEST_STATION_NAME="Your Station Name" \
   -e LOG_LEVEL="info" \
@@ -160,8 +164,8 @@ docker-compose down
 # SSH into your QNAP
 ssh admin@your-qnap-ip
 
-# Pull the image
-docker pull your-dockerhub-username/tempest-homekit-go:latest
+# Pull the image (multi-architecture: supports both AMD64 and ARM64)
+docker pull behrconsulting/tempest-homekit-go:latest
 ```
 
 #### Option B: Build on QNAP
@@ -182,13 +186,14 @@ docker build -t tempest-homekit-go:latest .
 2. **Click "Create" → "Create Container"**
 3. **Container Settings**:
    - **Name**: `tempest-homekit-go`
-   - **Image**: `your-dockerhub-username/tempest-homekit-go:latest` or `tempest-homekit-go:latest`
+   - **Image**: `behrconsulting/tempest-homekit-go:latest`
 
 4. **Network Settings**:
    - **Network Mode**: Bridge (recommended) or Host
    - **Port Forwarding**:
      - Host Port: `8080` → Container Port: `8080` (Web Dashboard)
      - Host Port: `51826` → Container Port: `51826` (HomeKit)
+     - Host Port: `8081` → Container Port: `8081` (Alarm Editor)
 
 5. **Environment Variables**:
    ```
@@ -228,7 +233,278 @@ docker build -t tempest-homekit-go:latest .
 - **Backup**: Include `/share/tempest-data` in QNAP backup jobs
 - **Updates**: Stop container, update image, restart
 - **Resource Usage**: Monitor in Storage & Snapshots → Overview
-- **Network**: Ensure ports 8080 and 51826 are open in firewall
+- **Network**: Ensure ports 8080, 8081, and 51826 are open in firewall
+
+## AWS Container Service Deployment
+
+### Overview
+
+AWS offers several container services for deploying Tempest HomeKit Go:
+- **Amazon ECS (Elastic Container Service)**: Managed container orchestration
+- **Amazon EKS (Elastic Kubernetes Service)**: Kubernetes-based orchestration
+- **AWS Fargate**: Serverless container execution
+- **AWS App Runner**: Fully managed container application service
+
+This guide focuses on Amazon ECS with Fargate for serverless deployment.
+
+### Prerequisites
+
+- **AWS Account** with appropriate permissions
+- **AWS CLI** configured (`aws configure`)
+- **Docker image** pushed to Amazon ECR or Docker Hub
+- **WeatherFlow API credentials**
+- **AWS VPC** with public subnets (for internet access)
+
+### Step 1: Prepare AWS Resources
+
+#### Create ECR Repository (if using ECR)
+
+```bash
+# Create ECR repository
+aws ecr create-repository \
+  --repository-name tempest-homekit-go \
+  --region us-east-1
+
+# Get repository URI
+REPO_URI=$(aws ecr describe-repositories \
+  --repository-names tempest-homekit-go \
+  --region us-east-1 \
+  --query 'repositories[0].repositoryUri' \
+  --output text)
+
+# Login to ECR
+aws ecr get-login-password --region us-east-1 | \
+  docker login --username AWS --password-stdin $REPO_URI
+```
+
+#### Push Image to ECR
+
+```bash
+# Tag and push your image
+docker tag tempest-homekit-go:latest $REPO_URI:latest
+docker push $REPO_URI:latest
+```
+
+### Step 2: Create ECS Cluster
+
+```bash
+# Create ECS cluster
+aws ecs create-cluster \
+  --cluster-name tempest-cluster \
+  --region us-east-1
+```
+
+### Step 3: Create Task Definition
+
+Create a file `task-definition.json`:
+
+```json
+{
+  "family": "tempest-homekit-go",
+  "taskRoleArn": "arn:aws:iam::123456789012:role/ecsTaskExecutionRole",
+  "executionRoleArn": "arn:aws:iam::123456789012:role/ecsTaskExecutionRole",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "containerDefinitions": [
+    {
+      "name": "tempest-homekit-go",
+      "image": "your-ecr-repo/tempest-homekit-go:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "hostPort": 8080,
+          "protocol": "tcp"
+        },
+        {
+          "containerPort": 51826,
+          "hostPort": 51826,
+          "protocol": "tcp"
+        },
+        {
+          "containerPort": 8081,
+          "hostPort": 8081,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "TEMPEST_TOKEN",
+          "value": "your-api-token"
+        },
+        {
+          "name": "TEMPEST_STATION_NAME",
+          "value": "Your Station Name"
+        },
+        {
+          "name": "WEB_PORT",
+          "value": "8080"
+        },
+        {
+          "name": "LOG_LEVEL",
+          "value": "info"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/tempest-homekit-go",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command": [
+          "CMD-SHELL",
+          "wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      }
+    }
+  ]
+}
+```
+
+Register the task definition:
+
+```bash
+aws ecs register-task-definition \
+  --cli-input-json file://task-definition.json \
+  --region us-east-1
+```
+
+### Step 4: Create Application Load Balancer (Optional)
+
+For production deployments with load balancing:
+
+```bash
+# Create ALB
+aws elbv2 create-load-balancer \
+  --name tempest-alb \
+  --subnets subnet-12345 subnet-67890 \
+  --security-groups sg-12345 \
+  --region us-east-1
+
+# Create target group
+aws elbv2 create-target-group \
+  --name tempest-targets \
+  --protocol HTTP \
+  --port 8080 \
+  --vpc-id vpc-12345 \
+  --target-type ip \
+  --region us-east-1
+
+# Create listener
+aws elbv2 create-listener \
+  --load-balancer-arn $ALB_ARN \
+  --protocol HTTP \
+  --port 80 \
+  --default-actions Type=forward,TargetGroupArn=$TARGET_GROUP_ARN \
+  --region us-east-1
+```
+
+### Step 5: Create ECS Service
+
+```bash
+# Create service
+aws ecs create-service \
+  --cluster tempest-cluster \
+  --service-name tempest-service \
+  --task-definition tempest-homekit-go \
+  --desired-count 1 \
+  --launch-type FARGATE \
+  --network-configuration "awsvpcConfiguration={subnets=[subnet-12345,subnet-67890],securityGroups=[sg-12345],assignPublicIp=ENABLED}" \
+  --load-balancers "targetGroupArn=$TARGET_GROUP_ARN,containerName=tempest-homekit-go,containerPort=8080" \
+  --region us-east-1
+```
+
+### Step 6: Configure Security Groups
+
+Ensure your security group allows inbound traffic:
+
+```bash
+# Allow HTTP (web dashboard)
+aws ec2 authorize-security-group-ingress \
+  --group-id sg-12345 \
+  --protocol tcp \
+  --port 8080 \
+  --cidr 0.0.0.0/0 \
+  --region us-east-1
+
+# Allow HomeKit
+aws ec2 authorize-security-group-ingress \
+  --group-id sg-12345 \
+  --protocol tcp \
+  --port 51826 \
+  --cidr 0.0.0.0/0 \
+  --region us-east-1
+```
+
+### Step 7: Access Your Application
+
+1. **Get Load Balancer DNS**: 
+   ```bash
+   aws elbv2 describe-load-balancers --names tempest-alb --region us-east-1
+   ```
+
+2. **Web Dashboard**: `http://your-alb-dns-name`
+3. **HomeKit Setup**: Use the Home app on iOS to add the bridge
+
+### AWS-Specific Considerations
+
+#### Cost Optimization
+- **Fargate Spot**: Use Fargate Spot for development/testing (up to 70% savings)
+- **Right-sizing**: Start with 0.25 vCPU / 512MB RAM, scale up if needed
+- **Auto-scaling**: Configure based on CPU/memory usage
+
+#### Persistence
+- **HomeKit Database**: Use EFS for persistent storage
+- **Environment Variables**: Store secrets in AWS Systems Manager Parameter Store or Secrets Manager
+- **Backups**: Enable automated backups for EFS volumes
+
+#### Networking
+- **VPC Endpoints**: Use VPC endpoints for ECR to avoid NAT Gateway costs
+- **Security Groups**: Restrict access to specific IP ranges for production
+- **CloudFront**: Add CloudFront distribution for global access and caching
+
+#### Monitoring
+- **CloudWatch Logs**: Application logs are automatically sent to CloudWatch
+- **CloudWatch Metrics**: Monitor ECS service metrics
+- **X-Ray**: Enable AWS X-Ray for distributed tracing
+
+#### Updates
+```bash
+# Update service with new image
+aws ecs update-service \
+  --cluster tempest-cluster \
+  --service tempest-service \
+  --task-definition tempest-homekit-go:new-version \
+  --region us-east-1
+```
+
+### Alternative: AWS App Runner (Simplified)
+
+For a fully managed experience:
+
+```bash
+# Create App Runner service
+aws apprunner create-service \
+  --service-name tempest-homekit-go \
+  --source-configuration "ImageRepository={ImageIdentifier=your-ecr-repo/tempest-homekit-go:latest,ImageConfiguration={Port=8080}}" \
+  --instance-configuration "Cpu=256,Memory=512" \
+  --region us-east-1
+```
+
+App Runner automatically handles:
+- Load balancing
+- Auto-scaling
+- Health checks
+- SSL certificates
 
 ## Building and Pushing Images
 
@@ -426,6 +702,7 @@ QNAP Container Station:
 | Port | Protocol | Purpose | Required |
 |------|----------|---------|----------|
 | `8080` | TCP | Web dashboard and API | Yes |
+| `8081` | TCP | Alarm editor web UI | Optional (for alarm configuration) |
 | `51826` | TCP | HomeKit bridge | Yes (for HomeKit) |
 
 ### Network Modes
@@ -503,6 +780,63 @@ sudo chown -R 1000:1000 /host/path/db
 - Check shared folder permissions
 - Ensure sufficient space in storage pool
 - Verify volume mount paths
+
+### AWS-Specific Issues
+
+#### ECS Service Not Starting
+```bash
+# Check service status
+aws ecs describe-services \
+  --cluster tempest-cluster \
+  --services tempest-service \
+  --region us-east-1
+
+# Check task status
+aws ecs list-tasks --cluster tempest-cluster --region us-east-1
+aws ecs describe-tasks --cluster tempest-cluster --tasks $TASK_ARN --region us-east-1
+```
+
+#### Task Definition Issues
+- Verify ECR repository permissions
+- Check execution role has necessary permissions
+- Ensure subnet security groups allow outbound internet access
+- Validate environment variables are properly set
+
+#### Load Balancer Issues
+```bash
+# Check target health
+aws elbv2 describe-target-health \
+  --target-group-arn $TARGET_GROUP_ARN \
+  --region us-east-1
+
+# Check ALB access logs
+aws elbv2 describe-load-balancers --names tempest-alb --region us-east-1
+```
+
+#### Networking Issues
+- Verify VPC has internet gateway for public subnets
+- Check security group rules allow inbound traffic on ports 8080, 8081, and 51826
+- Ensure NAT Gateway exists for private subnet outbound access
+- Validate route table configurations
+
+#### CloudWatch Logs
+```bash
+# View application logs
+aws logs tail /ecs/tempest-homekit-go \
+  --follow \
+  --region us-east-1
+
+# Check for specific errors
+aws logs filter-log-events \
+  --log-group-name /ecs/tempest-homekit-go \
+  --filter-pattern ERROR \
+  --region us-east-1
+```
+
+#### Fargate Resource Issues
+- **CPU/Memory**: Increase task size if containers are being killed
+- **ENI Limits**: Check ENI availability in subnets
+- **Service Limits**: Verify account limits for ECS services
 
 ### Logs and Debugging
 
@@ -613,6 +947,35 @@ services:
         syslog-address: "tcp://logstash:514"
 ```
 
+#### AWS Monitoring
+For ECS deployments:
+
+```bash
+# View CloudWatch metrics
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/ECS \
+  --metric-name CPUUtilization \
+  --dimensions Name=ClusterName,Value=tempest-cluster Name=ServiceName,Value=tempest-service \
+  --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 300 \
+  --statistics Average \
+  --region us-east-1
+
+# Set up CloudWatch alarms
+aws cloudwatch put-metric-alarm \
+  --alarm-name "TempestServiceUnhealthy" \
+  --alarm-description "Alert when ECS service becomes unhealthy" \
+  --metric-name UnhealthyTaskCount \
+  --namespace AWS/ECS \
+  --statistic Average \
+  --period 300 \
+  --threshold 1 \
+  --comparison-operator GreaterThanThreshold \
+  --dimensions Name=ClusterName,Value=tempest-cluster Name=ServiceName,Value=tempest-service \
+  --region us-east-1
+```
+
 ### Backup and Recovery
 
 #### Database Backup
@@ -631,6 +994,43 @@ docker start tempest-homekit-go
 - Use QNAP's built-in backup tools
 - Include `/share/tempest-data` in backup jobs
 - Schedule regular backups of HomeKit database
+
+#### AWS Backup
+For ECS deployments with persistent storage:
+
+```bash
+# Backup EFS volume (if using EFS)
+aws backup create-backup-vault --backup-vault-name tempest-backups --region us-east-1
+
+# Create backup plan
+aws backup create-backup-plan --backup-plan file://backup-plan.json --region us-east-1
+
+# Where backup-plan.json contains:
+{
+  "BackupPlan": {
+    "BackupPlanName": "tempest-homekit-backup",
+    "Rules": [
+      {
+        "RuleName": "DailyBackups",
+        "TargetBackupVaultName": "tempest-backups",
+        "ScheduleExpression": "cron(0 5 ? * * *)",
+        "Lifecycle": {
+          "DeleteAfterDays": 30
+        }
+      }
+    ]
+  }
+}
+```
+
+For RDS (if using database):
+```bash
+# Create DB snapshot
+aws rds create-db-snapshot \
+  --db-instance-identifier your-db-instance \
+  --db-snapshot-identifier tempest-snapshot-$(date +%Y%m%d) \
+  --region us-east-1
+```
 
 ### Performance Tuning
 
@@ -663,5 +1063,12 @@ For issues specific to Docker deployment:
 3. Verify configuration and environment variables
 4. Test with generated weather first
 5. Check GitHub issues for similar problems
+
+For AWS ECS deployments:
+1. Check ECS service and task status in AWS Console
+2. Review CloudWatch logs for application errors
+3. Verify security group and network configurations
+4. Check ECR repository permissions and image availability
+5. Validate task definition and environment variables
 
 For application-specific issues, see the main README.md and project documentation.

@@ -6,6 +6,7 @@ Tempest HomeKit Go is a Go service that reads WeatherFlow Tempest station data a
 
 Table of Contents
 - [Quick Start](#quick-start)
+- [Container Deployment](#container-deployment)
 - [Features](#features)
 - [Status Console](#status-console)
 - [Configuration](#configuration)
@@ -100,7 +101,7 @@ Planned enhancements and strategic priorities for upcoming releases. Items are g
 
 **High Priority - Completed:**
 - **Alarms and Notifications** ✓ - Fully implemented rule-based alerting system with multiple channels (Email, SMS, Webhook, Console, Syslog, OSLog, EventLog). Supports templated messages, cooldown periods, and interactive web-based alarm editor.
-  - CLI/Env: `--alarms @alarms.json` or `--alarms '{...json...}'`. File-watcher for auto-reload.
+  - CLI: `--alarms @alarms.json` or `--alarms '{...json...}'`. File-watcher for auto-reload.
   - Channels: SMTP/Microsoft 365 OAuth2 email, Twilio/AWS SNS SMS, HTTP webhooks, console logging, syslog, macOS OSLog, Windows EventLog
   - Features: Change detection operators (`*field`, `>field`, `<field>`), template expansion, cooldown management, web console status card
 
@@ -122,9 +123,9 @@ Planned enhancements and strategic priorities for upcoming releases. Items are g
 
 ### 🔄 In Progress / Medium Priority
 
-**Multi-station Monitoring** - Allow monitoring multiple Tempest stations from single instance
+- **Multi-station Monitoring** - Allow monitoring multiple Tempest stations from single instance
 - Description: Each station gets own data source, history buffer, and HomeKit grouping
-- CLI/Env: `--stations config.json` or multiple `--station-url` entries with station tagging
+- CLI: `--stations config.json` or multiple `--station-url` entries with station tagging
 - Notes: Requires per-station goroutines, scoped caches, and aggregated UI views
 
 **Container & Serverless Deployment** - Production deployment options
@@ -678,6 +679,91 @@ STATION_URL=http://localhost:8080/api/generate-weather ./tempest-homekit-go
 sudo ./scripts/install-service.sh --token "your-api-token" --station "Your Station Name"
 ```
 
+## Container Deployment
+
+The application is available as a Docker container for easy deployment on Docker Desktop, QNAP NAS Container Station, or any Docker-compatible platform.
+
+### Prerequisites
+- Docker or Docker-compatible container runtime
+- For WeatherFlow API: Valid API token and station name
+- For testing: Use generated weather (no API token required)
+
+### Quick Test with Generated Weather
+```bash
+# Build the image
+docker build -t tempest-homekit-go:latest .
+
+# Run with generated weather (no API token needed)
+docker run -p 8080:8080 --entrypoint ./tempest-homekit-go tempest-homekit-go:latest --use-generated-weather --station "Test Station"
+
+# Access web dashboard at http://localhost:8080
+```
+
+### Production Deployment with Docker Compose
+```yaml
+# docker-compose.yml
+version: '3.8'
+services:
+  tempest-homekit-go:
+    image: your-dockerhub-username/tempest-homekit-go:latest
+    ports:
+      - "8080:8080"  # Web dashboard
+      - "51826:51826"  # HomeKit
+    environment:
+      - TEMPEST_TOKEN=your-api-token
+      - TEMPEST_STATION_NAME=Your Station Name
+      - WEB_PORT=8080
+      - LOG_LEVEL=info
+    volumes:
+      - ./tempest-alarms.json:/home/appuser/tempest-alarms.json:ro
+      - ./db:/home/appuser/db
+    restart: unless-stopped
+```
+
+```bash
+# Run with docker-compose
+docker-compose up -d
+```
+
+### QNAP NAS Container Station
+1. **Pull the image** from Docker Hub or build locally
+2. **Create a new container** with these settings:
+   - **Image**: `your-dockerhub-username/tempest-homekit-go:latest`
+   - **Network**: Bridge or Host
+   - **Ports**: Map 8080 (web) and 51826 (HomeKit)
+   - **Environment Variables**: Set `TEMPEST_TOKEN`, `TEMPEST_STATION_NAME`, etc.
+   - **Volumes**: Mount persistent storage for `/home/appuser/db` (HomeKit database)
+   - **Restart Policy**: Always
+
+### Environment Variables
+All command-line flags can be set via environment variables. Key variables:
+- `TEMPEST_TOKEN`: WeatherFlow API token
+- `TEMPEST_STATION_NAME`: Your station name
+- `WEB_PORT`: Web dashboard port (default: 8080)
+- `LOG_LEVEL`: Logging level (error/warn/info/debug)
+- `ALARMS`: Alarm configuration file path
+
+### Building and Pushing to Docker Hub
+```bash
+# Build the image
+docker build -t tempest-homekit-go:latest .
+
+# Tag for Docker Hub
+docker tag tempest-homekit-go:latest your-dockerhub-username/tempest-homekit-go:latest
+
+# Push to Docker Hub
+docker push your-dockerhub-username/tempest-homekit-go:latest
+```
+
+### Container Features
+- **Multi-stage build**: Optimized for small image size
+- **Non-root user**: Runs as `appuser` for security
+- **Health checks**: Built-in `/health` endpoint
+- **Persistent storage**: HomeKit database persists across restarts
+- **Cross-platform**: Works on Linux, macOS, Windows, and NAS systems
+
+For detailed deployment instructions, see [DOCKER_DEPLOYMENT.md](docs/DOCKER_DEPLOYMENT.md).
+
 ## Installation
 
 ### Option 1: Build from Source
@@ -737,14 +823,14 @@ If you are using the WeatherFlow Tempest API (default behavior), provide your AP
 ### Configuration Options
 
 #### Command-Line Flags (alphabetical order)
-- `--alarms`: Alarm configuration: @filename.json or inline JSON string (default: none). Env: ALARMS
+- `--alarms`: Alarm configuration: @filename.json or inline JSON string (default: none)
 - `--alarms-edit`: Run alarm editor for specified config file: @filename.json (default: none)
-- `--alarms-edit-port`: Port for alarm editor web UI (default: 8081). Env: ALARMS_EDIT_PORT
+- `--alarms-edit-port`: Port for alarm editor web UI (default: 8081)
 - `--cleardb`: Clear HomeKit database and reset device pairing
 - `--disable-alarms`: Disable alarm initialization and processing (useful for testing or reducing resource usage)
 - `--disable-homekit`: Disable HomeKit services and run web console only
 - `--elevation`: Station elevation in meters (default: auto-detect, valid range: -430m to 8848m)
-- `--env`: Custom environment file to load (default: ".env"). Env: ENV_FILE
+ - `--env`: Custom environment file to load (default: ".env").
     - Overrides the default `.env` file location
     - Useful for multiple configurations or deployment environments
     - Example: `./tempest-homekit-go --env /etc/tempest/production.env`
@@ -757,22 +843,23 @@ If you are using the WeatherFlow Tempest API (default behavior), provide your AP
     - **UV**: `uv` or `uvi`
     - **Other sensors**: `humidity`, `wind`, `rain`, `pressure`, `lightning`
     - (default: "temp,lux,humidity")
-- `--station`: Tempest station name (default: "Chino Hills")
-- `--station-url`: Custom station URL for weather data (e.g., `http://localhost:8080/api/generate-weather`). Overrides Tempest API
-- `--history <points>`: Number of data points to store in history (default: 1000, min: 10). Env: `HISTORY_POINTS`
-- `--history-read`: Preload historical observations from Tempest API up to `HISTORY_POINTS` (bool). Env: `READ_HISTORY`
-- `--history-reduce <factor>`: Reduce historical data by averaging N points into 1 (default: 1 = no reduction). Env: `HISTORY_REDUCE`
-- `--history-reduce-method <method>`: Method to reduce historical data: `timebin` (default), `factor`, `lttb`. Env: `HISTORY_REDUCE_METHOD`
-- `--history-bin-size <minutes>`: Bin size in minutes for timebin reduction (default: 10). Env: `HISTORY_BIN_MINUTES`
-- `--history-keep-recent-hours <hours>`: Keep recent N hours of data at full resolution when reducing history (default: 24). Env: `HISTORY_KEEP_RECENT_HOURS`
-- `--chart-history <hours>`: Number of hours of data to show in charts (default: 24, 0=all). Env: `CHART_HISTORY_HOURS`
-- `--generate-path <path>`: Path for generated weather endpoint (default: `/api/generate-weather`). Env: `GENERATE_WEATHER_PATH`
-- `--status`: Enable terminal-based status console with real-time monitoring
-- `--status-refresh`: Status console refresh interval in seconds (default: 5)
-- `--status-timeout`: Status console auto-exit timeout in seconds, 0=never (default: 0)
-- `--status-theme`: Status console color theme name (default: "dark-ocean")
-- `--status-theme-list`: List all available status console themes and exit
--- `--token`: WeatherFlow API access token (required when using the WeatherFlow API as the data source)
+    - (default: "temp,lux,humidity")
+   - `--station`: Tempest station name (default: "Chino Hills") (Env: `TEMPEST_STATION_NAME`)
+   - `--station-url`: Custom station URL for weather data (e.g., `http://localhost:8080/api/generate-weather`). Overrides Tempest API
+ - `--history <points>`: Number of data points to store in history (default: 1000, min: 10) (Env: `HISTORY_POINTS`)
+ - `--history-read`: Preload historical observations from Tempest API up to configured history points (bool) (Env: `READ_HISTORY`)
+ - `--history-reduce <factor>`: Reduce historical data by averaging N points into 1 (default: 1 = no reduction) (Env: `HISTORY_REDUCE`)
+ - `--history-reduce-method <method>`: Method to reduce historical data: `timebin` (default), `factor`, `lttb` (Env: `HISTORY_REDUCE_METHOD`)
+ - `--history-bin-size <minutes>`: Bin size in minutes for timebin reduction (default: 10) (Env: `HISTORY_BIN_MINUTES`)
+ - `--history-keep-recent-hours <hours>`: Keep recent N hours of data at full resolution when reducing history (default: 24) (Env: `HISTORY_KEEP_RECENT_HOURS`)
+- `--chart-history <hours>`: Number of hours of data to show in charts (default: 24, 0=all)
+- `--generate-path <path>`: Path for generated weather endpoint (default: `/api/generate-weather`)
+ - `--status`: Enable terminal-based status console with real-time monitoring (Env: `STATUS`)
+ - `--status-refresh`: Status console refresh interval in seconds (default: 5) (Env: `STATUS_REFRESH`)
+ - `--status-timeout`: Status console auto-exit timeout in seconds, 0=never (default: 0)
+ - `--status-theme`: Status console color theme name (default: "dark-ocean")
+ - `--status-theme-list`: List all available status console themes and exit
+ - `--token`: WeatherFlow API access token (required when using the WeatherFlow API as the data source) (Env: `TEMPEST_TOKEN`)
 - `--units`: Units system - imperial, metric, or sae (default: "imperial")
 - `--units-pressure`: Pressure units - inHg or mb (default: "inHg")
 - `--udp-stream`: Enable UDP broadcast listener for local station monitoring (port 50222)
@@ -788,11 +875,97 @@ If you are using the WeatherFlow Tempest API (default behavior), provide your AP
 - `--use-web-status`: Enable headless browser scraping of TempestWX status page every 15 minutes (requires Chrome, incompatible with `--disable-internet`)
 - `--version`: Show version information and exit
 - `--webhook-listener`: Start webhook listener server on port 8082 (or custom port) to receive and inspect webhook requests
-- `--web-port`: Web dashboard port (default: "8080")
+-- `--web-port`: Web dashboard port (default: "8080") (Env: `WEB_PORT`)
 
-#### Environment Variables
-Environment variables are documented in the "Available Environment Variables" table below. Refer to that table for defaults and descriptions, e.g. `HISTORY_POINTS`, `STATUS_REFRESH`, `TEMPEST_TOKEN`, and others.
+#### Available Environment Variables
 
+**Core Configuration:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TEMPEST_TOKEN` | *(see below)* | WeatherFlow API token |
+| `TEMPEST_STATION_NAME` | *(required)* | Your station name from WeatherFlow |
+| `HOMEKIT_PIN` | `00102003` | HomeKit pairing PIN |
+| `SENSORS` | `temp,lux,humidity,uv` | Enabled sensors (comma-delimited) |
+| `WEB_PORT` | `8080` | Web console port |
+| `UNITS` | `imperial` | Unit system (imperial/metric/sae) |
+| `UNITS_PRESSURE` | `inHg` | Pressure units (inHg/mb/hpa) |
+| `HISTORY_POINTS` | `1000` | Data points to store (min 10) |
+| `CHART_HISTORY_HOURS` | `24` | Hours to display in charts (0=all) |
+| `LOG_LEVEL` | `error` | Logging level (error/warn/warning/info/debug) |
+| `LOG_FILTER` | *(empty)* | Filter log messages |
+| `ENV_FILE` | `.env` | Custom environment file to load |
+| `HISTORY_REDUCE` | `1` | Reduce historical points when loading (1 = no reduction) |
+| `HISTORY_REDUCE_METHOD` | `timebin` | Reduction method: timebin, factor, lttb |
+| `HISTORY_BIN_MINUTES` | `10` | Timebin size in minutes for timebin reduction |
+| `HISTORY_KEEP_RECENT_HOURS` | `24` | Keep recent N hours at full resolution when reducing |
+
+**Data Source Options:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `READ_HISTORY` | `false` | Preload historical data from API (true/false) |
+| `STATION_URL` | *(empty)* | Custom station URL (overrides Tempest API) |
+| `UDP_STREAM` | `false` | Enable UDP mode for offline operation (true/false) |
+| `DISABLE_INTERNET` | `false` | Disable all internet access (true/false) |
+| `GENERATE_WEATHER_PATH` | `/api/generate-weather` | Path for generated weather endpoint |
+
+**Alarm & Notification (Email):**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ALARMS` | *(empty)* | Alarm configuration: @filename.json or inline JSON |
+| `ALARMS_EDIT` | *(empty)* | Run alarm editor for specified config file |
+| `ALARMS_EDIT_PORT` | `8081` | Port for alarm editor web UI |
+| `TAG_LIST` | *(empty)* | Predefined tags for alarm editor dropdown (JSON array) |
+| `CONTACT_LIST` | *(empty)* | Contact list for alarm notifications (JSON array) |
+| `SMTP_HOST` | *(empty)* | SMTP server hostname |
+| `SMTP_PORT` | `587` | SMTP server port |
+| `SMTP_USERNAME` | *(empty)* | SMTP authentication username |
+| `SMTP_PASSWORD` | *(empty)* | SMTP authentication password |
+| `SMTP_FROM_ADDRESS` | *(empty)* | Email sender address |
+| `SMTP_FROM_NAME` | *(empty)* | Email sender name |
+| `SMTP_USE_TLS` | `true` | Use TLS for SMTP connection (true/false) |
+| `MS365_CLIENT_ID` | *(empty)* | Microsoft 365 OAuth2 client ID |
+| `MS365_CLIENT_SECRET` | *(empty)* | Microsoft 365 OAuth2 client secret |
+| `MS365_TENANT_ID` | *(empty)* | Microsoft 365 tenant ID |
+| `MS365_FROM_ADDRESS` | *(empty)* | Microsoft 365 sender address |
+
+**Alarm & Notification (SMS):**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TWILIO_ACCOUNT_SID` | *(empty)* | Twilio account SID |
+| `TWILIO_AUTH_TOKEN` | *(empty)* | Twilio authentication token |
+| `TWILIO_FROM_NUMBER` | *(empty)* | Twilio sender phone number (E.164 format) |
+| `AWS_ACCESS_KEY_ID` | *(empty)* | AWS access key for SNS |
+| `AWS_SECRET_ACCESS_KEY` | *(empty)* | AWS secret key for SNS |
+| `AWS_REGION` | *(empty)* | AWS region for SNS |
+| `AWS_SNS_TOPIC_ARN` | *(empty)* | AWS SNS topic ARN |
+
+**Alarm & Notification (Syslog):**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SYSLOG_ADDRESS` | *(empty)* | Syslog server address |
+| `SYSLOG_NETWORK` | *(empty)* | Syslog network protocol (tcp/udp) |
+| `SYSLOG_PRIORITY` | `warning` | Syslog priority level |
+| `SYSLOG_TAG` | `tempest-weather` | Syslog message tag |
+
+**Quick Flags ↔ Environment Mapping**
+
+| Flag | Environment Variable |
+|------|----------------------|
+| `--history` | `HISTORY_POINTS` |
+| `--history-read` | `READ_HISTORY` |
+| `--status` | `STATUS` |
+| `--status-refresh` | `STATUS_REFRESH` |
+| `--alarms` | `ALARMS` |
+| `--env` | `ENV_FILE` |
+| `--token` | `TEMPEST_TOKEN` |
+| `--station` | `TEMPEST_STATION_NAME` |
+
+Refer to the full table above for defaults and additional variables.
 ### Example with Full Configuration
 ```bash
 ./tempest-homekit-go \
@@ -1461,128 +1634,7 @@ The application supports configuration via environment variables, which can be s
 1. **Copy the example file:**
  ```bash
  cp .env.example .env
- ```
-
-2. **Edit `.env` with your values:**
- ```bash
- nano .env # or use your preferred editor
- ```
-
-3. **Run without flags:**
- ```bash
- ./tempest-homekit-go # Will automatically load .env settings
- ```
-
-#### Available Environment Variables
-
-**Core Configuration:**
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `TEMPEST_TOKEN` | *(see below)* | WeatherFlow API token |
-| `TEMPEST_STATION_NAME` | *(required)* | Your station name from WeatherFlow |
-| `HOMEKIT_PIN` | `00102003` | HomeKit pairing PIN |
-| `SENSORS` | `temp,lux,humidity,uv` | Enabled sensors (comma-delimited) |
-| `WEB_PORT` | `8080` | Web console port |
-| `UNITS` | `imperial` | Unit system (imperial/metric/sae) |
-| `UNITS_PRESSURE` | `inHg` | Pressure units (inHg/mb/hpa) |
-| `HISTORY_POINTS` | `1000` | Data points to store (min 10) |
-| `CHART_HISTORY_HOURS` | `24` | Hours to display in charts (0=all) |
-| `LOG_LEVEL` | `error` | Logging level (error/warn/warning/info/debug) |
-| `LOG_FILTER` | *(empty)* | Filter log messages |
-| `ENV_FILE` | `.env` | Custom environment file to load |
-| `HISTORY_REDUCE` | `1` | Reduce historical points when loading (1 = no reduction) |
-| `HISTORY_REDUCE_METHOD` | `timebin` | Reduction method: timebin, factor, lttb |
-| `HISTORY_BIN_MINUTES` | `10` | Timebin size in minutes for timebin reduction |
-| `HISTORY_KEEP_RECENT_HOURS` | `24` | Keep recent N hours at full resolution when reducing |
-
-**Data Source Options:**
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `READ_HISTORY` | `false` | Preload historical data from API (true/false) |
-| `STATION_URL` | *(empty)* | Custom station URL (overrides Tempest API) |
-| `UDP_STREAM` | `false` | Enable UDP mode for offline operation (true/false) |
-| `DISABLE_INTERNET` | `false` | Disable all internet access (true/false) |
-| `GENERATE_WEATHER_PATH` | `/api/generate-weather` | Path for generated weather endpoint |
-
-**Alarm & Notification (Email):**
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ALARMS` | *(empty)* | Alarm configuration: @filename.json or inline JSON |
-| `ALARMS_EDIT` | *(empty)* | Run alarm editor for specified config file |
-| `ALARMS_EDIT_PORT` | `8081` | Port for alarm editor web UI |
-| `TAG_LIST` | *(empty)* | Predefined tags for alarm editor dropdown (JSON array) |
-| `CONTACT_LIST` | *(empty)* | Contact list for alarm notifications (JSON array) |
-| `SMTP_HOST` | *(empty)* | SMTP server hostname |
-| `SMTP_PORT` | `587` | SMTP server port |
-| `SMTP_USERNAME` | *(empty)* | SMTP authentication username |
-| `SMTP_PASSWORD` | *(empty)* | SMTP authentication password |
-| `SMTP_FROM_ADDRESS` | *(empty)* | Email sender address |
-| `SMTP_FROM_NAME` | *(empty)* | Email sender name |
-| `SMTP_USE_TLS` | `true` | Use TLS for SMTP connection (true/false) |
-| `MS365_CLIENT_ID` | *(empty)* | Microsoft 365 OAuth2 client ID |
-| `MS365_CLIENT_SECRET` | *(empty)* | Microsoft 365 OAuth2 client secret |
-| `MS365_TENANT_ID` | *(empty)* | Microsoft 365 tenant ID |
-| `MS365_FROM_ADDRESS` | *(empty)* | Microsoft 365 sender address |
-
-**Alarm & Notification (SMS):**
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `TWILIO_ACCOUNT_SID` | *(empty)* | Twilio account SID |
-| `TWILIO_AUTH_TOKEN` | *(empty)* | Twilio authentication token |
-| `TWILIO_FROM_NUMBER` | *(empty)* | Twilio sender phone number (E.164 format) |
-| `AWS_ACCESS_KEY_ID` | *(empty)* | AWS access key for SNS |
-| `AWS_SECRET_ACCESS_KEY` | *(empty)* | AWS secret key for SNS |
-| `AWS_REGION` | *(empty)* | AWS region for SNS |
-| `AWS_SNS_TOPIC_ARN` | *(empty)* | AWS SNS topic ARN |
-
-**Alarm & Notification (Syslog):**
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SYSLOG_ADDRESS` | *(empty)* | Syslog server address |
-| `SYSLOG_NETWORK` | *(empty)* | Syslog network protocol (tcp/udp) |
-| `SYSLOG_PRIORITY` | `warning` | Syslog priority level |
-| `SYSLOG_TAG` | `tempest-weather` | Syslog message tag |
-
-**Note:** Command-line flags always override environment variables.
-
-**Overriding .env Boolean Values**: To disable a boolean flag that's set to `true` in your `.env` file, explicitly pass `--flag=false` on the command line. For example, if your `.env` contains `USE_HISTORY=true`, you can disable it with:
-```bash
-./tempest-homekit-go --use-history=false
-```
-
-#### Example .env Configurations
-
-**API Mode (Cloud Data):**
-```bash
-# Get your token from: https://tempestwx.com/settings/tokens
-TEMPEST_TOKEN=your-actual-token-here
-TEMPEST_STATION_NAME=My Station Name
-SENSORS=temp,humidity,pressure,wind
-LOG_LEVEL=info
-```
-
-Warning: **Security Note**: Never commit your `.env` file with real credentials! See [SECURITY.md](SECURITY.md) for details.
-
-**UDP Mode (Local Offline):**
-```bash
-UDP_STREAM=true
-DISABLE_INTERNET=true
-HISTORY_POINTS=500
-CHART_HISTORY_HOURS=12
-LOG_LEVEL=debug
-```
-
-**Minimal Memory:**
-```bash
-HISTORY_POINTS=100
-CHART_HISTORY_HOURS=6
-SENSORS=temp,humidity
-```
+Available environment variables are documented above. See the "Available Environment Variables" section for defaults, descriptions, and examples.
 
 ### WeatherFlow API Token
 1. Visit [tempestwx.com](https://tempestwx.com)

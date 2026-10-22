@@ -44,8 +44,8 @@ RUN chown -R appuser:appuser ./pkg/
 # Switch to non-root user
 USER appuser
 
-# Expose ports (web dashboard and HomeKit)
-EXPOSE 8080 51826
+# Expose ports (web dashboard, HomeKit, and alarm editor)
+EXPOSE 8080 51826 8081
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
