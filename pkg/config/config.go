@@ -373,9 +373,10 @@ func LoadConfig() *Config {
 
 	// Handle elevation configuration - auto lookup by default
 	if !elevationProvided || strings.ToLower(elevationStr) == "auto" {
-		// Skip station elevation lookup if using generated weather - elevation will be set later from generated location
-		if !cfg.UseGeneratedWeather {
-			if elevation, err := lookupStationElevation(cfg.Token, cfg.StationName); err != nil {
+		// Skip station elevation lookup if using generated weather - elevation will be set later from generated location.
+		// Also skip it with --disable-internet: the lookup calls api.open-elevation.com.
+		if !cfg.UseGeneratedWeather && !cfg.DisableInternet {
+			if elevation, err := stationElevationLookup(cfg.Token, cfg.StationName); err != nil {
 				log.Printf("Warning: Failed to lookup elevation automatically: %v", err)
 				log.Printf("INFO: Using fallback elevation 903ft (275.2m)")
 			} else {
@@ -704,6 +705,10 @@ type ElevationResponse struct {
 		Elevation float64 `json:"elevation"`
 	} `json:"results"`
 }
+
+// stationElevationLookup is the elevation auto-lookup LoadConfig uses. It is a
+// variable only so tests can observe whether a lookup (a network call) happens.
+var stationElevationLookup = lookupStationElevation
 
 // lookupStationElevation attempts to get elevation from station coordinates.
 //

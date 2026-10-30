@@ -205,7 +205,7 @@ func TestSMSNotifier_Send_MissingConfig(t *testing.T) {
 
 	err := notifier.Send(alarm, channel, obs, "TestStation")
 	if err == nil {
-		t.Error("Expected error for missing SMS config")
+		t.Fatal("Expected error for missing SMS config")
 	}
 	if err.Error() != "SMS configuration missing for channel" {
 		t.Errorf("Expected 'SMS configuration missing' error, got: %v", err)
@@ -238,7 +238,7 @@ func TestSMSNotifier_Send_MissingGlobalConfig(t *testing.T) {
 
 	err := notifier.Send(alarm, channel, obs, "TestStation")
 	if err == nil {
-		t.Error("Expected error for missing global SMS config")
+		t.Fatal("Expected error for missing global SMS config")
 	}
 	if err.Error() != "global SMS configuration not set" {
 		t.Errorf("Expected 'global SMS configuration not set' error, got: %v", err)
@@ -273,7 +273,7 @@ func TestEmailNotifier_Send_MissingConfig(t *testing.T) {
 
 	err := notifier.Send(alarm, channel, obs, "TestStation")
 	if err == nil {
-		t.Error("Expected error for missing email config")
+		t.Fatal("Expected error for missing email config")
 	}
 	if err.Error() != "email configuration missing for channel" {
 		t.Errorf("Expected 'email configuration missing' error, got: %v", err)
@@ -307,7 +307,7 @@ func TestEmailNotifier_Send_MissingGlobalConfig(t *testing.T) {
 
 	err := notifier.Send(alarm, channel, obs, "TestStation")
 	if err == nil {
-		t.Error("Expected error for missing global email config")
+		t.Fatal("Expected error for missing global email config")
 	}
 	if err.Error() != "global email configuration not set" {
 		t.Errorf("Expected 'global email configuration not set' error, got: %v", err)

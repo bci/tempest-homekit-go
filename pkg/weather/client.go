@@ -692,7 +692,8 @@ func GetAllHistoricalObservations(stationID int, token string, logLevel string, 
 		url := fmt.Sprintf("%s/observations/device/%d?day_offset=%d&token=%s", BaseURL, deviceID, dayOffset, token)
 
 		if logLevel == "debug" {
-			fmt.Printf("DEBUG: Fetching day_offset=%d from %s\n", dayOffset, url)
+			// Do not print url itself: it carries the API token as a query parameter.
+			fmt.Printf("DEBUG: Fetching day_offset=%d from %s/observations/device/%d (token redacted)\n", dayOffset, BaseURL, deviceID)
 		}
 
 		// Attempt request with retries for 429 (rate limit). Use Retry-After header if provided.
@@ -758,6 +759,16 @@ func GetAllHistoricalObservations(stationID int, token string, logLevel string, 
 
 			// success
 			break
+		}
+
+		// The retry loop above has already counted this day as empty and closed any
+		// body; with no usable response (transport errors exhausted, 429 retries
+		// exhausted, or a non-200) skip to the next day instead of reading the body.
+		if resp == nil || resp.StatusCode != http.StatusOK {
+			if consecutiveEmpty >= 3 {
+				break
+			}
+			continue
 		}
 
 		body, err := io.ReadAll(resp.Body)

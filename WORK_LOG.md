@@ -217,3 +217,29 @@ golangci-lint reports the same 5 pre-existing staticcheck findings before and af
 
 Bugs noticed during the pass were not fixed here; they are in `docs/code-review/2026-10-16.md`
 on the `code-review` branch.
+
+## 2026-10-16 — Code review and surgical fixes (branch `code-review`)
+
+Why: a senior-engineer review of the whole codebase after the documentation pass, fixing
+only what was clearly wrong and safe to fix, so the open decisions are visible rather than
+guessed at. Full write-up: `docs/code-review/2026-10-16.md`.
+
+Fixed (each with a regression test that failed before the fix):
+- History loader panicked on transport errors (nil response) and double-counted failed days.
+- A single UDP broadcast with a `null` field crashed the whole process; such packets are
+  now dropped with a warning.
+- `/api/alarm-status` raced alarm evaluation because `Manager.GetConfig` shared the Alarms
+  slice; it now copies it under the lock.
+- Alarm editor "save to .env" could duplicate the entire `.env` (credentials included) or
+  delete unrelated settings after an unquoted `CONTACT_LIST=`/`TAG_LIST=`.
+- Syslog channel ignored its configured priority (always warning).
+- `--disable-internet` still called api.open-elevation.com for elevation auto-lookup.
+- Panics on a short Twilio SID and on a 1-character secret in `maskString`; the history
+  debug line no longer prints the API token; nine tests used `t.Error` before
+  dereferencing `err`.
+
+Not fixed, by design: anything that changes intended behaviour, public interfaces, go.mod,
+deployment or data formats — notably the broken Windows build (`log/syslog`), the
+unauthenticated all-interfaces editor that can write `.env`, working-directory-relative
+static assets, and the rain/wind unit inconsistencies. These are the 14 questions in the
+review document.

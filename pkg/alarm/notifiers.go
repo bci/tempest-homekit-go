@@ -105,8 +105,8 @@ type SyslogNotifier struct {
 // Send expands channel.Template and writes it to syslog. It dials the remote
 // server when config has both Network and Address, otherwise the local daemon
 // with tag "tempest-weather". A new connection is opened and closed per
-// message. The configured Priority is passed when opening the writer, but the
-// message itself is always written at warning severity. It returns an error
+// message, written at the configured Priority (error, warning or info; warning
+// when unset or unrecognised). It returns an error
 // if syslog cannot be reached or the write fails.
 func (n *SyslogNotifier) Send(alarm *Alarm, channel *Channel, obs *weather.Observation, stationName string) error {
 	message := expandTemplate(channel.Template, alarm, obs, stationName)
@@ -141,7 +141,9 @@ func (n *SyslogNotifier) Send(alarm *Alarm, channel *Channel, obs *weather.Obser
 	}
 	defer func() { _ = writer.Close() }()
 
-	return writer.Warning(message)
+	// Write uses the writer's own priority, i.e. the configured severity.
+	_, err = writer.Write([]byte(message))
+	return err
 }
 
 // EventLogNotifier sends notifications to system event log (Windows) or syslog (Unix).
@@ -620,7 +622,11 @@ func (n *SMSNotifier) sendTwilio(smsConfig *SMSConfig, message string) error {
 	}
 
 	logger.Debug("Sending SMS via Twilio")
-	logger.Debug("  Account SID: %s", accountSID[:10]+"...")
+	sidPrefix := accountSID
+	if len(sidPrefix) > 10 {
+		sidPrefix = sidPrefix[:10]
+	}
+	logger.Debug("  Account SID: %s", sidPrefix+"...")
 	logger.Debug("  From: %s", fromNumber)
 	logger.Debug("  To: %v", smsConfig.To)
 

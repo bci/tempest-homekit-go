@@ -202,11 +202,15 @@ func RunSMSTest(alarmsJSON, stationName string) {
 
 // maskString masks a string for display: it shows the first 4 and last 4
 // characters of strings longer than 8, "***" plus the last 2 characters of
-// shorter ones, and "(not set)" for an empty string. A one-character input
-// panics (slice index -1).
+// strings of 3 to 8 characters, just "***" for 1 or 2 characters, and
+// "(not set)" for an empty string.
 func maskString(s string) string {
 	if s == "" {
 		return "(not set)"
+	}
+	if len(s) <= 2 {
+		// Too short to show any of it without revealing all of it.
+		return "***"
 	}
 	if len(s) <= 8 {
 		return "***" + s[len(s)-2:]

@@ -481,14 +481,18 @@ func (m *Manager) Stop() {
 }
 
 // GetConfig returns a copy of the current alarm configuration.
-// The copy is shallow: the Alarms slice and the credential pointers are shared
-// with the live config, so callers must treat it as read-only.
+// The Alarms slice is copied under the lock, so callers can read each alarm's
+// runtime state (TriggeredCount, last fired time) without racing
+// ProcessObservation. The copy is still shallow below that level: the credential
+// pointers, Channels, Tags and the alarms' internal maps are shared with the live
+// config, so callers must treat it as read-only.
 func (m *Manager) GetConfig() *AlarmConfig {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	// Return a copy to prevent external modifications
 	configCopy := *m.config
+	configCopy.Alarms = append([]Alarm(nil), m.config.Alarms...)
 	return &configCopy
 }
 

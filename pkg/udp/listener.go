@@ -431,6 +431,15 @@ func PrettyPrintMessage(data []byte) string {
 // records the first serial number seen, and dispatches on the message type.
 // Unparseable messages are logged at debug level and dropped.
 func (l *UDPListener) processMessage(data []byte) {
+	// The decoders below use unchecked type assertions and indexes on the JSON
+	// arrays; a null or missing field in one broadcast must not kill the listener
+	// goroutine (and with it the process), so drop such a packet instead.
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Warn("Dropping malformed UDP message: %v", r)
+		}
+	}()
+
 	// Call packet callback if set (for --test-udp mode)
 	l.mu.RLock()
 	callback := l.packetCallback
